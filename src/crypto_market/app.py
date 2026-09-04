@@ -55,6 +55,8 @@ def run_backtest(
     entry_dow: int = Query(3, ge=0, le=4, description="custom: buy at this weekday's close (Mon=0)"),
     exit_dow: int = Query(0, ge=0, le=4, description="custom: sell at this weekday's close"),
     split: str | None = Query(None, description="in-sample before this date, out-of-sample from it"),
+    sma: int = Query(0, ge=0, le=400, description="trend filter: only long above this N-day average (0 = off)"),
+    satellite: float = Query(25, ge=0, le=100, description="percent of the portfolio running the custom rule; the rest is held"),
 ):
     try:
         df = data.load(ticker)
@@ -68,8 +70,14 @@ def run_backtest(
         raise HTTPException(400, f"{ticker}: only {len(df)} bars in range")
 
     er, sl = expense_ratio / 100, slippage / 100
-    results = {s: backtest.run(df, s, er, sl, entry_dow=entry_dow, exit_dow=exit_dow)
+    results = {s: backtest.run(df, s, er, sl, entry_dow=entry_dow, exit_dow=exit_dow, sma=sma)
                for s in backtest.STRATEGIES}
+    # Core + satellite: two sleeves run side by side, never rebalanced.
+    w = satellite / 100
+    results["blend"] = {
+        "equity": (1 - w) * results["buy_hold"]["equity"] + w * results["custom"]["equity"],
+        "trades": results["custom"]["trades"],
+    }
     dates = [d.date().isoformat() for d in df.index]
     series = {s: [round(v, 2) for v in r["equity"]] for s, r in results.items()}
     stats = {s: {k: _clean(v) for k, v in backtest.stats(r["equity"], r["trades"]).items()}

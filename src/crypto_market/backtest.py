@@ -96,12 +96,48 @@ def _fills(df: pd.DataFrame, strategy: str, entry_dow: int = 3, exit_dow: int = 
     return out
 
 
+def _trend_gate(df: pd.DataFrame, fills: list, strategy: str, sma: int) -> list:
+    """Only be long while the close is above its `sma`-day average.
+
+    The signal is read at the prior close (for an open fill) or the fill
+    bar's own close, so it never peeks. Buy & hold becomes the classic
+    trend rule: in at the next open after a cross above, out at the next
+    open after a cross below. The weekly rules just skip legs that would
+    start below the average.
+    """
+    above = df["close"] > df["close"].rolling(sma).mean()
+    if strategy == "buy_hold":
+        out, held = [], False
+        for prev, d in zip(df.index[:-1], df.index[1:]):
+            if above[prev] and not held:
+                out.append((d, "open", "buy")); held = True
+            elif not above[prev] and held:
+                out.append((d, "open", "sell")); held = False
+        if held:
+            out.append((df.index[-1], "close", "sell"))
+        return out
+    out = []
+    for buy, sell in zip(fills[0::2], fills[1::2]):
+        d, when, _ = buy
+        i = df.index.get_loc(d)
+        if when == "open":
+            if i == 0:
+                continue
+            d = df.index[i - 1]
+        if bool(above[d]):
+            out += [buy, sell]
+    return out
+
+
 def run(df: pd.DataFrame, strategy: str, expense_ratio: float = 0.0,
         slippage: float = 0.0, start_cash: float = 10_000.0,
-        entry_dow: int = 3, exit_dow: int = 0) -> dict:
+        entry_dow: int = 3, exit_dow: int = 0, sma: int = 0) -> dict:
     df = _prepare(df)
+    fills = _fills(df, strategy, entry_dow, exit_dow)
+    if sma:
+        fills = _trend_gate(df, fills, strategy, sma)
     by_day: dict[pd.Timestamp, list] = {}
-    for d, when, side in _fills(df, strategy, entry_dow, exit_dow):
+    for d, when, side in fills:
         by_day.setdefault(d, []).append((when, side))
 
     daily_decay = (1.0 - expense_ratio) ** (1.0 / 365.0)

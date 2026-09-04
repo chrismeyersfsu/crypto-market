@@ -16,6 +16,10 @@ six hours. Three rules are marked to market every bar:
 - **custom** — close of one weekday to close of another, once a week (default
   Thu → Mon; wraps the weekend when exit ≤ entry)
 
+A trend filter (long only above an N-day average) can gate any rule, and a
+"core + satellite" line shows most of the money held with a slice in the
+custom rule, never rebalanced.
+
 An optional split date reports every rule's stats before and after it, so a
 rule picked on old data can be tracked forward.
 

@@ -9,13 +9,13 @@
     color-scheme: light;
     --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
     --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,.10);
-    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --good: #006300; --bad: #d03b3b;
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --good: #006300; --bad: #d03b3b;
   }
   @media (prefers-color-scheme: dark) { :root {
     color-scheme: dark;
     --page: #0d0d0d; --surface: #1a1a19; --ink: #fff; --ink-2: #c3c2b7; --muted: #898781;
     --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,.10);
-    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --good: #0ca30c; --bad: #e66767;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --good: #0ca30c; --bad: #e66767;
   } }
   * { box-sizing: border-box }
   body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif }
@@ -45,7 +45,7 @@
 <body>
 <main>
   <h1>Weekday vs weekend holding</h1>
-  <p class="sub">Does "buy during the week, sell for the weekend" beat holding? Fills at the open/close of the first and last trading day of each week, $0 commission, expense ratio accrued per calendar day held.</p>
+  <p class="sub">Does a weekly holding rule beat just holding? Fills at the open/close of the named days, $0 commission, expense ratio accrued per calendar day held. "Core + satellite" runs most of the money as buy &amp; hold and a slice in the custom rule, never rebalanced.</p>
 
   <form id="f">
     <label>Ticker <select id="ticker"></select></label>
@@ -57,6 +57,8 @@
     <label>Custom: buy at close of <select id="entry"><option value="0">Mon</option><option value="1">Tue</option><option value="2">Wed</option><option value="3" selected>Thu</option><option value="4">Fri</option></select></label>
     <label>sell at close of <select id="exit"><option value="0" selected>Mon</option><option value="1">Tue</option><option value="2">Wed</option><option value="3">Thu</option><option value="4">Fri</option></select></label>
     <label>Out-of-sample from <input type="date" id="split"></label>
+    <label>Trend filter: long only above <select id="sma"><option value="0">off</option><option value="20">20-day avg</option><option value="50">50-day avg</option><option value="100">100-day avg</option><option value="200">200-day avg</option></select></label>
+    <label>Satellite % in custom rule <input type="number" id="sat" value="25" min="0" max="100" step="5"></label>
     <label>Scale <select id="scale"><option value="linear">linear</option><option value="logarithmic">log</option></select></label>
     <button class="primary">Run</button>
     <span id="status" class="hint"></span>
@@ -70,11 +72,13 @@
   <div class="card">
     <h2>Growth of $10,000</h2>
     <p class="hint" id="meta"></p>
+    <p class="hint" id="filterNote"></p>
     <div class="legend">
       <span style="--c:var(--s1)">Buy &amp; hold</span>
       <span style="--c:var(--s2)">Weekday only (Mon open → Fri close)</span>
       <span style="--c:var(--s3)">Weekend only (Fri close → Mon open)</span>
       <span style="--c:var(--s4)" id="customLegend">Custom</span>
+      <span style="--c:var(--s5)" id="blendLegend">Core + satellite</span>
     </div>
     <div class="chart"><canvas id="eq"></canvas></div>
   </div>
@@ -116,7 +120,7 @@ const money = v => v == null ? "–" : "$" + Math.round(v).toLocaleString();
 const num = (v, d = 2) => v == null ? "–" : v.toFixed(d);
 const signCls = v => v == null ? "" : v >= 0 ? "pos" : "neg";
 const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const NAMES = { buy_hold: "Buy & hold", weekday: "Weekday only", weekend: "Weekend only", custom: "Custom" };
+const NAMES = { buy_hold: "Buy & hold", weekday: "Weekday only", weekend: "Weekend only", custom: "Custom", blend: "Core + satellite" };
 let eqChart, dowChart;
 
 Chart.defaults.color = css("--muted");
@@ -137,7 +141,7 @@ async function loadTickers() {
 
 function params() {
   const g = id => document.getElementById(id).value;
-  const p = new URLSearchParams({ ticker: g("custom").trim() || g("ticker"), expense_ratio: g("er") || 0, slippage: g("slip") || 0, entry_dow: g("entry"), exit_dow: g("exit") });
+  const p = new URLSearchParams({ ticker: g("custom").trim() || g("ticker"), expense_ratio: g("er") || 0, slippage: g("slip") || 0, entry_dow: g("entry"), exit_dow: g("exit"), sma: g("sma"), satellite: g("sat") || 0 });
   if (g("start")) p.set("start", g("start")); if (g("end")) p.set("end", g("end")); if (g("split")) p.set("split", g("split"));
   return p;
 }
@@ -160,9 +164,13 @@ function render(d) {
   const isSpot = /-USD$/.test(m.symbol);
   const customName = `${DOW[+document.getElementById("entry").value]} close → ${DOW[+document.getElementById("exit").value]} close`;
   NAMES.custom = customName; document.getElementById("customLegend").textContent = customName;
+  const sat = +document.getElementById("sat").value, sma = +document.getElementById("sma").value;
+  const blendName = `${100 - sat}% held + ${sat}% rule`;
+  NAMES.blend = blendName; document.getElementById("blendLegend").textContent = blendName;
+  document.getElementById("filterNote").textContent = sma ? `Trend filter on: long only while the close is above its ${sma}-day average (buy & hold becomes in/out at the next open; weekly rules skip legs that would start below it).` : "";
 
   // Verdict + tiles
-  const wd = s.weekday, we = s.weekend, bh = s.buy_hold, cu = s.custom;
+  const wd = s.weekday, we = s.weekend, bh = s.buy_hold, cu = s.custom, bl = s.blend;
   const vc = document.getElementById("verdictCard"); vc.hidden = false;
   const t = d.weekday_vs_weekend_t;
   const beat = wd.total_return > bh.total_return;
@@ -177,10 +185,11 @@ function render(d) {
     ["Max drawdown (B&H → weekday)", `${pct(bh.max_drawdown, 0)} → ${pct(wd.max_drawdown, 0)}`, null],
     ["Weekday legs / win rate", `${wd.trades} / ${pct(wd.win_rate, 0)}`, null],
     [`${customName} CAGR / maxDD`, `${pct(cu.cagr)} / ${pct(cu.max_drawdown, 0)}`, cu.cagr],
+    [`${blendName} CAGR / maxDD`, `${pct(bl.cagr)} / ${pct(bl.max_drawdown, 0)}`, bl.cagr],
   ].map(([k, v, sg]) => `<div class="tile"><div class="k">${k}</div><div class="v ${signCls(sg)}">${v}</div></div>`).join("");
 
   // Equity chart
-  const colors = { buy_hold: css("--s1"), weekday: css("--s2"), weekend: css("--s3"), custom: css("--s4") };
+  const colors = { buy_hold: css("--s1"), weekday: css("--s2"), weekend: css("--s3"), custom: css("--s4"), blend: css("--s5") };
   const ds = Object.keys(NAMES).map(k => ({ label: NAMES[k], data: d.equity[k], borderColor: colors[k], borderWidth: 2, pointRadius: 0, pointHitRadius: 8, tension: 0 }));
   eqChart?.destroy();
   eqChart = new Chart(document.getElementById("eq"), {
@@ -200,7 +209,7 @@ function render(d) {
     ["Median leg", k => pct(s[k].median_trade, 3), k => s[k].median_trade], ["t-stat (mean leg vs 0)", k => num(s[k].t_stat)],
   ];
   document.getElementById("stats").innerHTML = `<tr><th></th>${Object.values(NAMES).map(n => `<th>${n}</th>`).join("")}</tr>` +
-    rows.map(([lab, f, sg]) => `<tr><td>${lab}</td>${Object.keys(NAMES).map(k => `<td class="${sg ? signCls(sg(k)) : ""}">${f(k)}</td>`).join("")}</tr>`).join("");
+    rows.map(([lab, f, sg], i) => `<tr><td>${lab}</td>${Object.keys(NAMES).map(k => `<td class="${sg ? signCls(sg(k)) : ""}">${(k === "blend" && i >= 6) || (k === "buy_hold" && i >= 8) ? "–" : f(k)}</td>`).join("")}</tr>`).join("");
 
   // In-sample / out-of-sample
   const sc = document.getElementById("sampleCard");
@@ -212,7 +221,7 @@ function render(d) {
     document.getElementById("sample").innerHTML =
       `<tr><th></th>${cols.map(c => `<th colspan="2">${c[0]}</th>`).join("")}</tr>` +
       `<tr><th></th>${cols.map(() => "<th>in</th><th>out</th>").join("")}</tr>` +
-      Object.keys(NAMES).map(k => `<tr><td>${NAMES[k]}</td>${cols.map(([, key, f]) => ["in", "out"].map(h => { const v = k === "buy_hold" && ["trades", "avg_trade", "t_stat"].includes(key) ? null : d.sample[k][h][key]; return `<td class="${["cagr","avg_trade"].includes(key) ? signCls(v) : ""}">${f(v)}</td>`; }).join("")).join("")}</tr>`).join("");
+      Object.keys(NAMES).map(k => `<tr><td>${NAMES[k]}</td>${cols.map(([, key, f]) => ["in", "out"].map(h => { const v = ["buy_hold", "blend"].includes(k) && ["trades", "avg_trade", "t_stat"].includes(key) ? null : d.sample[k][h][key]; return `<td class="${["cagr","avg_trade"].includes(key) ? signCls(v) : ""}">${f(v)}</td>`; }).join("")).join("")}</tr>`).join("");
   } else sc.hidden = true;
 
   // Day-of-week chart
@@ -237,7 +246,7 @@ document.getElementById("f").addEventListener("submit", run);
 document.getElementById("scale").addEventListener("change", () => eqChart && (eqChart.options.scales.y.type = document.getElementById("scale").value, eqChart.update()));
 loadTickers().then(() => {
   const q = new URLSearchParams(location.search);
-  for (const [k, id] of [["ticker", "ticker"], ["start", "start"], ["end", "end"], ["expense_ratio", "er"], ["slippage", "slip"], ["entry_dow", "entry"], ["exit_dow", "exit"], ["split", "split"]]) if (q.has(k)) document.getElementById(id).value = q.get(k);
+  for (const [k, id] of [["ticker", "ticker"], ["start", "start"], ["end", "end"], ["expense_ratio", "er"], ["slippage", "slip"], ["entry_dow", "entry"], ["exit_dow", "exit"], ["split", "split"], ["sma", "sma"], ["satellite", "sat"]]) if (q.has(k)) document.getElementById(id).value = q.get(k);
   run();
 });
 </script>
