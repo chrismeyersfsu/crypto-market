@@ -50,6 +50,7 @@
   <nav class="tabs">
     <button class="tab active" id="tabBacktest">Weekday backtest</button>
     <button class="tab" id="tabFunding">Funding arb</button>
+    <button class="tab" id="tabOnchain">Large-transfer signal</button>
   </nav>
 
   <section id="viewBacktest">
@@ -162,6 +163,47 @@
     <div class="card">
       <h2>By year</h2>
       <table id="fYear"></table>
+    </div>
+  </section>
+
+  <section id="viewOnchain" hidden>
+    <h1>Does a burst of large transfers predict price?</h1>
+    <p class="sub">Signal: average on-chain transaction size (est. transfer volume ÷ transaction count, from blockchain.info) vs. its trailing 90-day robust average. A day where that ratio spikes is a day with disproportionately large transfers — a free proxy for "whale" activity, without exchange address labels. Rule: buy at the close of a spike day, sell N days later; legs never overlap.</p>
+
+    <form id="fOnchain">
+      <label>Spike threshold (z-score) <input type="number" id="oZ" value="2" step="0.5" min="0.5" max="5"></label>
+      <label>Hold days <input type="number" id="oHold" value="7" min="1" max="30"></label>
+      <label>Out-of-sample from <input type="date" id="oSplit" value="2024-01-01"></label>
+      <label>Scale <select id="oScale"><option value="logarithmic">log</option><option value="linear">linear</option></select></label>
+      <button class="primary">Run</button>
+      <span id="oStatus" class="hint"></span>
+    </form>
+
+    <div class="card">
+      <p class="verdict" id="oVerdict"></p>
+      <div class="tiles" id="oTiles"></div>
+    </div>
+
+    <div class="card">
+      <h2>Growth of $10,000: signal-only exposure vs. holding</h2>
+      <p class="hint">The signal strategy is in the market only on the days after a spike — usually a small fraction of the time.</p>
+      <div class="legend">
+        <span style="--c:var(--s1)">Hold BTC</span>
+        <span style="--c:var(--s3)">In only after a spike</span>
+      </div>
+      <div class="chart"><canvas id="oEq"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h2>In-sample vs out-of-sample</h2>
+      <p class="hint" id="oSampleHint"></p>
+      <table id="oSample"></table>
+    </div>
+
+    <div class="card">
+      <details><summary>Spike legs (table view)</summary>
+        <table id="oTrades"></table>
+      </details>
     </div>
   </section>
 </main>
@@ -301,13 +343,17 @@ function render(d) {
 function showTab(name) {
   document.getElementById("viewBacktest").hidden = name !== "backtest";
   document.getElementById("viewFunding").hidden = name !== "funding";
+  document.getElementById("viewOnchain").hidden = name !== "onchain";
   document.getElementById("tabBacktest").classList.toggle("active", name === "backtest");
   document.getElementById("tabFunding").classList.toggle("active", name === "funding");
+  document.getElementById("tabOnchain").classList.toggle("active", name === "onchain");
   localStorage.setItem("cm-tab", name);
   if (name === "funding" && !fundingLoaded) { fundingLoaded = true; runFunding(); }
+  if (name === "onchain" && !onchainLoaded) { onchainLoaded = true; runOnchain(); }
 }
 document.getElementById("tabBacktest").addEventListener("click", () => showTab("backtest"));
 document.getElementById("tabFunding").addEventListener("click", () => showTab("funding"));
+document.getElementById("tabOnchain").addEventListener("click", () => showTab("onchain"));
 
 // -------- Funding arb tab --------
 let fundingLoaded = false, fEqChart, fRateChart;
@@ -377,7 +423,65 @@ function renderFunding(d) {
 
 document.getElementById("fFunding").addEventListener("submit", runFunding);
 document.getElementById("fScale").addEventListener("change", () => fEqChart && (fEqChart.options.scales.y.type = document.getElementById("fScale").value, fEqChart.update()));
-showTab(localStorage.getItem("cm-tab") === "funding" ? "funding" : "backtest");
+showTab(["funding", "onchain"].includes(localStorage.getItem("cm-tab")) ? localStorage.getItem("cm-tab") : "backtest");
+
+// -------- Large-transfer signal tab --------
+let onchainLoaded = false, oEqChart;
+function oParams() {
+  const g = id => document.getElementById(id).value;
+  const p = new URLSearchParams({ z_thresh: g("oZ") || 2, hold_days: g("oHold") || 7 });
+  if (g("oSplit")) p.set("split", g("oSplit"));
+  return p;
+}
+async function runOnchain(e) {
+  e && e.preventDefault();
+  const status = document.getElementById("oStatus");
+  status.textContent = "loading…"; status.className = "hint";
+  const r = await fetch("/api/onchain?" + oParams());
+  if (!r.ok) { status.textContent = (await r.json()).detail; status.className = "err"; return; }
+  renderOnchain(await r.json()); status.textContent = "";
+}
+function renderOnchain(d) {
+  const s = d.stats, t = d.signal_t_stat, meaningful = Math.abs(t) >= 2;
+  document.getElementById("oVerdict").innerHTML =
+    `${d.n_spikes} spike days found. The ${document.getElementById("oHold").value}-day return after a spike averaged ` +
+    `<b class="${signCls(d.fwd_return_spike_mean - d.fwd_return_base_mean)}">${pct(d.fwd_return_spike_mean, 2)}</b>, vs ` +
+    `<b>${pct(d.fwd_return_base_mean, 2)}</b> on an average day (t = <b>${num(t)}</b>, ${meaningful ? "statistically meaningful" : "within noise"}). ` +
+    `Trading only those windows turned $10k into <b>${money(d.equity_signal[d.equity_signal.length - 1])}</b> (vs <b>${money(d.equity_hold[d.equity_hold.length - 1])}</b> for holding throughout)` +
+    ` — check the split below before trusting the full-history number; it usually looks better in-sample than out.`;
+  document.getElementById("oTiles").innerHTML = [
+    ["Spike days", d.n_spikes], ["Legs taken", s.trades], ["Win rate", pct(s.win_rate, 0)],
+    ["Avg leg", pct(s.avg_trade, 2), s.avg_trade], ["Median leg", pct(s.median_trade, 2), s.median_trade],
+    ["Full-history t-stat", num(t), null],
+  ].map(([k, v, sg]) => `<div class="tile"><div class="k">${k}</div><div class="v ${sg !== undefined ? signCls(sg) : ""}">${v}</div></div>`).join("");
+
+  const scale = document.getElementById("oScale").value;
+  oEqChart?.destroy();
+  oEqChart = new Chart(document.getElementById("oEq"), {
+    type: "line",
+    data: { labels: d.dates, datasets: [
+      { label: "Hold BTC", data: d.equity_hold, borderColor: css("--s1"), borderWidth: 2, pointRadius: 0, pointHitRadius: 8 },
+      { label: "Signal only", data: d.equity_signal, borderColor: css("--s3"), borderWidth: 2, pointRadius: 0, pointHitRadius: 8 },
+    ] },
+    options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${money(c.parsed.y)}` } } },
+      scales: { x: { ticks: { maxTicksLimit: 8, maxRotation: 0 }, grid: { display: false } },
+                y: { type: scale, ticks: { callback: v => money(v), maxTicksLimit: 7 }, grid: { color: css("--grid") } } } }
+  });
+
+  const sp = document.getElementById("oSplit").value;
+  document.getElementById("oSampleHint").textContent = `Before ${sp} vs from ${sp} on — the number that matters is "out", since "in" is what found the rule.`;
+  const cols = [["Spikes", "n_spikes", v => v ?? "–"], ["Spike fwd return", "fwd_return_spike_mean", v => pct(v, 2)], ["Baseline fwd return", "fwd_return_base_mean", v => pct(v, 2)], ["Signal t-stat", "signal_t_stat", v => num(v)], ["CAGR (while active)", "cagr", v => pct(v)], ["Legs", "trades", v => v ?? "–"], ["Win rate", "win_rate", v => pct(v, 0)]];
+  document.getElementById("oSample").innerHTML = d.sample ?
+    `<tr><th></th><th>In-sample</th><th>Out-of-sample</th></tr>` +
+    cols.map(([lab, key, f]) => `<tr><td>${lab}</td><td>${f(d.sample.in[key])}</td><td class="${key === "signal_t_stat" ? signCls(d.sample.out[key]) : ""}">${f(d.sample.out[key])}</td></tr>`).join("")
+    : "";
+
+  document.getElementById("oTrades").innerHTML = "<tr><th>Entry</th><th>Exit</th><th>Days</th><th>Return</th></tr>" +
+    d.trades.slice().reverse().map(x => `<tr><td>${x.entry}</td><td>${x.exit}</td><td>${x.days}</td><td class="${signCls(x.ret)}">${pct(x.ret, 2)}</td></tr>`).join("");
+}
+document.getElementById("fOnchain").addEventListener("submit", runOnchain);
+document.getElementById("oScale").addEventListener("change", () => oEqChart && (oEqChart.options.scales.y.type = document.getElementById("oScale").value, oEqChart.update()));
 
 document.getElementById("f").addEventListener("submit", run);
 function ruleUI() { const b = document.getElementById("rule").value === "breakout"; document.querySelectorAll("label.days").forEach(l => l.hidden = b); document.querySelectorAll("label.brk").forEach(l => l.hidden = !b); }

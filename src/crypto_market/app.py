@@ -8,7 +8,7 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 
-from . import backtest, data, funding
+from . import backtest, data, funding, onchain
 
 app = FastAPI(title="crypto-market")
 STATIC = Path(__file__).parent / "static"
@@ -115,6 +115,57 @@ def run_backtest(
         ],
         "sample": sample,
         "trades": {s: results[s]["trades"].to_dict("records") for s in ("weekday", "weekend", "custom")},
+    }
+
+
+@app.get("/api/onchain")
+def onchain_signal(
+    z_thresh: float = Query(2.0, ge=0.5, le=5),
+    hold_days: int = Query(7, ge=1, le=30),
+    start: str | None = None,
+    end: str | None = None,
+    split: str | None = Query(None, description="in-sample before this date, out-of-sample from it"),
+):
+    d = onchain.load()
+    btc = data.load("BTC-USD")["close"]
+    btc.index = btc.index.normalize()
+    if start:
+        d = d[d.index >= pd.Timestamp(start)]
+    if end:
+        d = d[d.index <= pd.Timestamp(end)]
+    if len(d) < 30:
+        raise HTTPException(400, "not enough on-chain history in range")
+
+    r = onchain.backtest(d, btc, z_thresh, hold_days)
+    bh_eq = (btc.reindex(r["equity"].index).ffill() / btc.reindex(r["equity"].index).ffill().iloc[0])
+    st = {k: _clean(v) for k, v in backtest.stats(r["equity"], r["trades"]).items()}
+
+    sample = None
+    if split:
+        cut = pd.Timestamp(split)
+        halves = {}
+        for h, sub in (("in", d[d.index < cut]), ("out", d[d.index >= cut])):
+            rr = onchain.backtest(sub, btc, z_thresh, hold_days) if len(sub) > 30 else None
+            halves[h] = {k: _clean(v) for k, v in backtest.stats(rr["equity"], rr["trades"]).items()} if rr else {}
+            halves[h]["fwd_return_spike_mean"] = _clean(rr["fwd_return_spike_mean"]) if rr else None
+            halves[h]["fwd_return_base_mean"] = _clean(rr["fwd_return_base_mean"]) if rr else None
+            halves[h]["signal_t_stat"] = _clean(rr["t_stat"]) if rr else None
+            halves[h]["n_spikes"] = rr["n_spikes"] if rr else 0
+        sample = halves
+
+    return {
+        "dates": [dt.date().isoformat() for dt in r["equity"].index],
+        "equity_signal": [round(v, 2) for v in 10_000 * r["equity"]],
+        "equity_hold": [round(v, 2) for v in 10_000 * bh_eq],
+        "z": [round(v, 2) for v in d["z"].reindex(r["equity"].index)],
+        "z_thresh": z_thresh,
+        "stats": st,
+        "n_spikes": r["n_spikes"],
+        "fwd_return_spike_mean": _clean(r["fwd_return_spike_mean"]),
+        "fwd_return_base_mean": _clean(r["fwd_return_base_mean"]),
+        "signal_t_stat": _clean(r["t_stat"]),
+        "sample": sample,
+        "trades": r["trades"].to_dict("records"),
     }
 
 

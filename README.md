@@ -13,6 +13,15 @@ rate — price exposure cancels). Funding history comes from Deribit's public
 API (hourly, back to Apr 2019 — the only free source with this much of it)
 and is cached to `data/funding_btc_perpetual.csv`, appended to on refresh.
 
+A third tab tests whether a burst of unusually large on-chain transfers
+predicts price: average transaction size (blockchain.info, daily, free,
+back to 2010) vs. its trailing 90-day robust average, buy on a spike, sell
+N days later. Signal-only, no exchange address labels, so it can't say
+whether coins moved toward an exchange (likely selling) or into cold
+storage (likely accumulation) -- it only sees that unusually large
+transfers happened. Comes with the same in/out-of-sample split as the
+other tabs; the effect is small and doesn't reliably survive it.
+
 Daily bars come from Yahoo Finance (no key) and are cached under `data/` for
 six hours. Three rules are marked to market every bar:
 
