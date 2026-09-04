@@ -7,6 +7,12 @@ IBIT, …) and on BTC/ETH spot.
     uv sync
     uv run crypto-market        # http://127.0.0.1:8870
 
+Two tabs: the weekday/weekend backtester above, and a funding-rate-arbitrage
+tab (own spot BTC, short an equal-size perpetual future, collect the funding
+rate — price exposure cancels). Funding history comes from Deribit's public
+API (hourly, back to Apr 2019 — the only free source with this much of it)
+and is cached to `data/funding_btc_perpetual.csv`, appended to on refresh.
+
 Daily bars come from Yahoo Finance (no key) and are cached under `data/` for
 six hours. Three rules are marked to market every bar:
 

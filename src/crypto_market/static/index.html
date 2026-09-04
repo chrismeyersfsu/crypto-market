@@ -18,6 +18,9 @@
     --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --good: #0ca30c; --bad: #e66767;
   } }
   * { box-sizing: border-box }
+  .tabs { display: flex; gap: 4px; margin-bottom: 14px }
+  .tab { font: inherit; color: var(--ink-2); background: none; border: none; border-bottom: 2px solid transparent; padding: 8px 4px; cursor: pointer }
+  .tab.active { color: var(--ink); border-bottom-color: var(--s1); font-weight: 600 }
   body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif }
   main { max-width: 1100px; margin: 0 auto; padding: 16px }
   h1 { font-size: 20px; margin: 0 0 4px } .sub { color: var(--ink-2); margin: 0 0 16px }
@@ -44,6 +47,12 @@
 </head>
 <body>
 <main>
+  <nav class="tabs">
+    <button class="tab active" id="tabBacktest">Weekday backtest</button>
+    <button class="tab" id="tabFunding">Funding arb</button>
+  </nav>
+
+  <section id="viewBacktest">
   <h1>Weekday vs weekend holding</h1>
   <p class="sub">Does a weekly holding rule beat just holding? Fills at the open/close of the named days, $0 commission, expense ratio accrued per calendar day held. "Core + satellite" runs most of the money as buy &amp; hold and a slice in the custom rule, never rebalanced.</p>
 
@@ -113,6 +122,48 @@
       </div>
     </details>
   </div>
+  </section>
+
+  <section id="viewFunding" hidden>
+    <h1>BTC funding-rate arbitrage</h1>
+    <p class="sub">Own 1 BTC, short an equal-size BTC perpetual future: price exposure cancels, and every hour you collect (or pay) the funding rate. Data: Deribit BTC-PERPETUAL, hourly, since Apr 2019 — the only free source with this much history.</p>
+
+    <form id="fFunding">
+      <label>Start <input type="date" id="fStart" value="2019-05-01"></label>
+      <label>End <input type="date" id="fEnd"></label>
+      <label>Capital tied up per $1 hedged <input type="number" id="fCap" value="2" step="0.5" min="1" max="5"></label>
+      <label>Scale <select id="fScale"><option value="logarithmic">log</option><option value="linear">linear</option></select></label>
+      <button class="primary">Run</button>
+      <span id="fStatus" class="hint"></span>
+    </form>
+
+    <div class="card">
+      <p class="verdict" id="fVerdict"></p>
+      <div class="tiles" id="fTiles"></div>
+    </div>
+
+    <div class="card">
+      <h2>Growth of $10,000</h2>
+      <p class="hint">Spot is shown for scale, not as something the carry trade is meant to beat — it's a hedged, low-volatility return, not a directional one.</p>
+      <div class="legend">
+        <span style="--c:var(--s1)">Hold BTC spot</span>
+        <span style="--c:var(--s3)">Carry only (funding collected, no capital charge)</span>
+        <span style="--c:var(--s4)">Carry, capital-adjusted</span>
+      </div>
+      <div class="chart"><canvas id="fEq"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h2>Annualized funding rate over time</h2>
+      <p class="hint">Rate × 365, day by day. Above zero: shorts (this trade) get paid. Below zero: shorts pay — the trade loses money that day regardless of price.</p>
+      <div class="chart short"><canvas id="fRate"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h2>By year</h2>
+      <table id="fYear"></table>
+    </div>
+  </section>
 </main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -245,6 +296,88 @@ function render(d) {
       tr.slice().reverse().map(x => `<tr><td>${x.entry}</td><td>${x.exit}</td><td>${x.days}</td><td class="${signCls(x.ret)}">${pct(x.ret, 2)}</td></tr>`).join("");
   }
 }
+
+// -------- Tabs --------
+function showTab(name) {
+  document.getElementById("viewBacktest").hidden = name !== "backtest";
+  document.getElementById("viewFunding").hidden = name !== "funding";
+  document.getElementById("tabBacktest").classList.toggle("active", name === "backtest");
+  document.getElementById("tabFunding").classList.toggle("active", name === "funding");
+  localStorage.setItem("cm-tab", name);
+  if (name === "funding" && !fundingLoaded) { fundingLoaded = true; runFunding(); }
+}
+document.getElementById("tabBacktest").addEventListener("click", () => showTab("backtest"));
+document.getElementById("tabFunding").addEventListener("click", () => showTab("funding"));
+
+// -------- Funding arb tab --------
+let fundingLoaded = false, fEqChart, fRateChart;
+
+function fParams() {
+  const g = id => document.getElementById(id).value;
+  const p = new URLSearchParams({ capital_multiple: g("fCap") || 2 });
+  if (g("fStart")) p.set("start", g("fStart")); if (g("fEnd")) p.set("end", g("fEnd"));
+  return p;
+}
+
+async function runFunding(e) {
+  e && e.preventDefault();
+  const status = document.getElementById("fStatus");
+  status.textContent = "loading…"; status.className = "hint";
+  const r = await fetch("/api/funding?" + fParams());
+  if (!r.ok) { status.textContent = (await r.json()).detail; status.className = "err"; return; }
+  const d = await r.json(); status.textContent = "";
+  renderFunding(d);
+}
+
+function renderFunding(d) {
+  const s = d.stats, cap = document.getElementById("fCap").value;
+  document.getElementById("fVerdict").innerHTML =
+    `$10,000 fully hedged (long spot, short an equal perpetual) earned <b class="${signCls(s.carry.cagr)}">${pct(s.carry.cagr)}</b>/yr in funding, ` +
+    `zero net price exposure — max drawdown just <b>${pct(s.carry.max_drawdown, 1)}</b> vs <b>${pct(s.spot.max_drawdown, 0)}</b> for holding BTC outright. ` +
+    `Funding was negative (you pay instead of receive) on <b>${pct(d.share_days_negative, 0)}</b> of days. ` +
+    `At ${cap}x capital tied up (spot + short collateral), the return on capital actually used is <b class="${signCls(s.carry_adjusted.cagr)}">${pct(s.carry_adjusted.cagr)}</b>/yr.`;
+  document.getElementById("fTiles").innerHTML = [
+    ["Carry CAGR (on notional)", pct(s.carry.cagr), s.carry.cagr],
+    [`Carry CAGR (${cap}× capital)`, pct(s.carry_adjusted.cagr), s.carry_adjusted.cagr],
+    ["Carry max drawdown", pct(s.carry.max_drawdown, 1), s.carry.max_drawdown],
+    ["Carry return / vol", num(s.carry.sharpe), null],
+    ["Spot CAGR (for reference)", pct(s.spot.cagr), s.spot.cagr],
+    ["Days funding was negative", pct(d.share_days_negative, 0), -d.share_days_negative],
+  ].map(([k, v, sg]) => `<div class="tile"><div class="k">${k}</div><div class="v ${signCls(sg)}">${v}</div></div>`).join("");
+
+  const scale = document.getElementById("fScale").value;
+  fEqChart?.destroy();
+  fEqChart = new Chart(document.getElementById("fEq"), {
+    type: "line",
+    data: { labels: d.dates, datasets: [
+      { label: "Hold BTC spot", data: d.equity.spot, borderColor: css("--s1"), borderWidth: 2, pointRadius: 0, pointHitRadius: 8 },
+      { label: "Carry only", data: d.equity.carry, borderColor: css("--s3"), borderWidth: 2, pointRadius: 0, pointHitRadius: 8 },
+      { label: "Carry, capital-adjusted", data: d.equity.carry_adjusted, borderColor: css("--s4"), borderWidth: 2, pointRadius: 0, pointHitRadius: 8 },
+    ] },
+    options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${money(c.parsed.y)}` } } },
+      scales: { x: { ticks: { maxTicksLimit: 8, maxRotation: 0 }, grid: { display: false } },
+                y: { type: scale, ticks: { callback: v => money(v), maxTicksLimit: 7 }, grid: { color: css("--grid") } } } }
+  });
+
+  fRateChart?.destroy();
+  const colors = d.annualized_rate.map(v => v >= 0 ? css("--s3") : css("--bad"));
+  fRateChart = new Chart(document.getElementById("fRate"), {
+    type: "bar",
+    data: { labels: d.dates, datasets: [{ data: d.annualized_rate.map(v => v * 100), backgroundColor: colors, borderRadius: 2, maxBarThickness: 6 }] },
+    options: { responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${num(c.parsed.y, 1)}% annualized` } } },
+      scales: { x: { ticks: { maxTicksLimit: 8, maxRotation: 0 }, grid: { display: false } },
+                y: { ticks: { callback: v => v + "%" }, grid: { color: css("--grid") } } } }
+  });
+
+  document.getElementById("fYear").innerHTML = "<tr><th>Year</th><th>Mean annualized</th><th>Best day (ann.)</th><th>Worst day (ann.)</th><th>Days negative</th></tr>" +
+    d.by_year.map(y => `<tr><td>${y.year}</td><td class="${signCls(y.mean_annualized)}">${pct(y.mean_annualized, 1)}</td><td class="pos">${pct(y.max_annualized, 0)}</td><td class="neg">${pct(y.min_annualized, 0)}</td><td>${y.days_negative} / ${y.days}</td></tr>`).join("");
+}
+
+document.getElementById("fFunding").addEventListener("submit", runFunding);
+document.getElementById("fScale").addEventListener("change", () => fEqChart && (fEqChart.options.scales.y.type = document.getElementById("fScale").value, fEqChart.update()));
+showTab(localStorage.getItem("cm-tab") === "funding" ? "funding" : "backtest");
 
 document.getElementById("f").addEventListener("submit", run);
 function ruleUI() { const b = document.getElementById("rule").value === "breakout"; document.querySelectorAll("label.days").forEach(l => l.hidden = b); document.querySelectorAll("label.brk").forEach(l => l.hidden = !b); }

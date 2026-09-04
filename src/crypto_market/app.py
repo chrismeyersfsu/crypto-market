@@ -8,7 +8,7 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 
-from . import backtest, data
+from . import backtest, data, funding
 
 app = FastAPI(title="crypto-market")
 STATIC = Path(__file__).parent / "static"
@@ -115,6 +115,55 @@ def run_backtest(
         ],
         "sample": sample,
         "trades": {s: results[s]["trades"].to_dict("records") for s in ("weekday", "weekend", "custom")},
+    }
+
+
+@app.get("/api/funding")
+def funding_series(
+    start: str | None = None,
+    end: str | None = None,
+    capital_multiple: float = Query(2.0, ge=1, le=5, description="capital tied up per $1 of exposure (spot + short collateral)"),
+):
+    d = funding.daily()
+    if start:
+        d = d[d.index >= pd.Timestamp(start)]
+    if end:
+        d = d[d.index <= pd.Timestamp(end)]
+    if len(d) < 2:
+        raise HTTPException(400, "not enough funding history in range")
+
+    carry = (1 + d["rate"]).cumprod()
+    carry_adj = (1 + d["rate"] / capital_multiple).cumprod()  # same $ earned, more $ tied up
+    spot = d["close"] / d["close"].iloc[0]
+
+    def stats(eq: pd.Series) -> dict:
+        yrs = (eq.index[-1] - eq.index[0]).days / 365.25
+        cagr = eq.iloc[-1] ** (1 / yrs) - 1
+        dly = eq.pct_change().dropna()
+        vol = dly.std() * (365 ** 0.5) if len(dly) > 1 else float("nan")
+        dd = (eq / eq.cummax() - 1).min()
+        return {"cagr": _clean(cagr), "max_drawdown": _clean(dd), "volatility": _clean(vol),
+                "sharpe": _clean(cagr / vol if vol else float("nan")), "final": _clean(10_000 * eq.iloc[-1])}
+
+    by_year = []
+    for y, g in d.groupby(d.index.year):
+        ann = g["rate"] * 365
+        by_year.append({"year": int(y), "mean_annualized": _clean(float(ann.mean())),
+                         "min_annualized": _clean(float(ann.min())), "max_annualized": _clean(float(ann.max())),
+                         "days": len(g), "days_negative": int((g["rate"] < 0).sum())})
+
+    return {
+        "dates": [dt.date().isoformat() for dt in d.index],
+        "daily_rate": [round(v, 6) for v in d["rate"]],
+        "annualized_rate": [round(v * 365, 4) for v in d["rate"]],
+        "equity": {
+            "carry": [round(10_000 * v, 2) for v in carry],
+            "carry_adjusted": [round(10_000 * v, 2) for v in carry_adj],
+            "spot": [round(10_000 * v, 2) for v in spot],
+        },
+        "stats": {"carry": stats(carry), "carry_adjusted": stats(carry_adj), "spot": stats(spot)},
+        "by_year": by_year,
+        "share_days_negative": _clean(float((d["rate"] < 0).mean())),
     }
 
 
