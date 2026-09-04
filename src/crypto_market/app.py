@@ -57,6 +57,9 @@ def run_backtest(
     split: str | None = Query(None, description="in-sample before this date, out-of-sample from it"),
     sma: int = Query(0, ge=0, le=400, description="trend filter: only long above this N-day average (0 = off)"),
     satellite: float = Query(25, ge=0, le=100, description="percent of the portfolio running the custom rule; the rest is held"),
+    rule: str = Query("days", pattern="^(days|breakout)$", description="which custom rule: weekday->weekday or N-bar-high breakout"),
+    breakout_n: int = Query(20, ge=2, le=250),
+    hold_bars: int = Query(5, ge=1, le=60),
 ):
     try:
         df = data.load(ticker)
@@ -70,8 +73,9 @@ def run_backtest(
         raise HTTPException(400, f"{ticker}: only {len(df)} bars in range")
 
     er, sl = expense_ratio / 100, slippage / 100
-    results = {s: backtest.run(df, s, er, sl, entry_dow=entry_dow, exit_dow=exit_dow, sma=sma)
-               for s in backtest.STRATEGIES}
+    kw = dict(entry_dow=entry_dow, exit_dow=exit_dow, sma=sma, breakout_n=breakout_n, hold_bars=hold_bars)
+    results = {s: backtest.run(df, s, er, sl, **kw) for s in ("buy_hold", "weekday", "weekend")}
+    results["custom"] = backtest.run(df, "breakout" if rule == "breakout" else "custom", er, sl, **kw)
     # Core + satellite: two sleeves run side by side, never rebalanced.
     w = satellite / 100
     results["blend"] = {

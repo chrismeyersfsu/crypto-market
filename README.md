@@ -13,8 +13,9 @@ six hours. Three rules are marked to market every bar:
 - **buy_hold** — first open to last close
 - **weekday** — Mon open → Fri close (first/last trading day of the week), flat over the weekend
 - **weekend** — Fri close → Mon open, flat during the week
-- **custom** — close of one weekday to close of another, once a week (default
-  Thu → Mon; wraps the weekend when exit ≤ entry)
+- **custom** — either close of one weekday to close of another, once a week
+  (default Thu → Mon; wraps the weekend when exit ≤ entry), or a breakout:
+  in at the close that sets a new N-day high, out H trading days later
 
 A trend filter (long only above an N-day average) can gate any rule, and a
 "core + satellite" line shows most of the money held with a slice in the

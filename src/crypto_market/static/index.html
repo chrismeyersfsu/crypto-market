@@ -54,8 +54,11 @@
     <label>End <input type="date" id="end"></label>
     <label>Expense ratio %/yr <input type="number" id="er" value="0.25" step="0.05" min="0"></label>
     <label>Slippage %/side <input type="number" id="slip" value="0" step="0.01" min="0"></label>
-    <label>Custom: buy at close of <select id="entry"><option value="0">Mon</option><option value="1">Tue</option><option value="2">Wed</option><option value="3" selected>Thu</option><option value="4">Fri</option></select></label>
-    <label>sell at close of <select id="exit"><option value="0" selected>Mon</option><option value="1">Tue</option><option value="2">Wed</option><option value="3">Thu</option><option value="4">Fri</option></select></label>
+    <label>Custom rule <select id="rule"><option value="days">weekday → weekday</option><option value="breakout">new N-day high, hold H days</option></select></label>
+    <label class="days">buy at close of <select id="entry"><option value="0">Mon</option><option value="1">Tue</option><option value="2">Wed</option><option value="3" selected>Thu</option><option value="4">Fri</option></select></label>
+    <label class="days">sell at close of <select id="exit"><option value="0" selected>Mon</option><option value="1">Tue</option><option value="2">Wed</option><option value="3">Thu</option><option value="4">Fri</option></select></label>
+    <label class="brk" hidden>N-day high <input type="number" id="bn" value="20" min="2" max="250"></label>
+    <label class="brk" hidden>hold H trading days <input type="number" id="bh" value="5" min="1" max="60"></label>
     <label>Out-of-sample from <input type="date" id="split"></label>
     <label>Trend filter: long only above <select id="sma"><option value="0">off</option><option value="20">20-day avg</option><option value="50">50-day avg</option><option value="100">100-day avg</option><option value="200">200-day avg</option></select></label>
     <label>Satellite % in custom rule <input type="number" id="sat" value="25" min="0" max="100" step="5"></label>
@@ -141,7 +144,7 @@ async function loadTickers() {
 
 function params() {
   const g = id => document.getElementById(id).value;
-  const p = new URLSearchParams({ ticker: g("custom").trim() || g("ticker"), expense_ratio: g("er") || 0, slippage: g("slip") || 0, entry_dow: g("entry"), exit_dow: g("exit"), sma: g("sma"), satellite: g("sat") || 0 });
+  const p = new URLSearchParams({ ticker: g("custom").trim() || g("ticker"), expense_ratio: g("er") || 0, slippage: g("slip") || 0, entry_dow: g("entry"), exit_dow: g("exit"), sma: g("sma"), satellite: g("sat") || 0, rule: g("rule"), breakout_n: g("bn") || 20, hold_bars: g("bh") || 5 });
   if (g("start")) p.set("start", g("start")); if (g("end")) p.set("end", g("end")); if (g("split")) p.set("split", g("split"));
   return p;
 }
@@ -162,7 +165,8 @@ function render(d) {
   document.getElementById("meta").textContent = `${m.name || m.symbol} · ${m.first} → ${m.last} · ${m.bars} bars`;
   const s = d.stats, scale = document.getElementById("scale").value;
   const isSpot = /-USD$/.test(m.symbol);
-  const customName = `${DOW[+document.getElementById("entry").value]} close → ${DOW[+document.getElementById("exit").value]} close`;
+  const gv = id => document.getElementById(id).value;
+  const customName = gv("rule") === "breakout" ? `New ${gv("bn")}-day high → hold ${gv("bh")}d` : `${DOW[+gv("entry")]} close → ${DOW[+gv("exit")]} close`;
   NAMES.custom = customName; document.getElementById("customLegend").textContent = customName;
   const sat = +document.getElementById("sat").value, sma = +document.getElementById("sma").value;
   const blendName = `${100 - sat}% held + ${sat}% rule`;
@@ -243,11 +247,13 @@ function render(d) {
 }
 
 document.getElementById("f").addEventListener("submit", run);
+function ruleUI() { const b = document.getElementById("rule").value === "breakout"; document.querySelectorAll("label.days").forEach(l => l.hidden = b); document.querySelectorAll("label.brk").forEach(l => l.hidden = !b); }
+document.getElementById("rule").addEventListener("change", ruleUI);
 document.getElementById("scale").addEventListener("change", () => eqChart && (eqChart.options.scales.y.type = document.getElementById("scale").value, eqChart.update()));
 loadTickers().then(() => {
   const q = new URLSearchParams(location.search);
-  for (const [k, id] of [["ticker", "ticker"], ["start", "start"], ["end", "end"], ["expense_ratio", "er"], ["slippage", "slip"], ["entry_dow", "entry"], ["exit_dow", "exit"], ["split", "split"], ["sma", "sma"], ["satellite", "sat"]]) if (q.has(k)) document.getElementById(id).value = q.get(k);
-  run();
+  for (const [k, id] of [["ticker", "ticker"], ["start", "start"], ["end", "end"], ["expense_ratio", "er"], ["slippage", "slip"], ["entry_dow", "entry"], ["exit_dow", "exit"], ["split", "split"], ["sma", "sma"], ["satellite", "sat"], ["rule", "rule"], ["breakout_n", "bn"], ["hold_bars", "bh"]]) if (q.has(k)) document.getElementById(id).value = q.get(k);
+  ruleUI(); run();
 });
 </script>
 </body>

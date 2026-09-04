@@ -8,6 +8,8 @@
   custom    in from the close of weekday `entry_dow` to the close of weekday
             `exit_dow`, once a week; wraps over the weekend when exit <= entry
             (Thu -> Mon), and a holiday pushes a fill to the next bar
+  breakout  in at the close that makes a new `breakout_n`-bar high, out at the
+            close `hold_bars` bars later; legs never overlap
 
 Bars on Sat/Sun (crypto spot) are never fill days, so on every series
 weekday = Mon open -> Fri close and weekend = Fri close -> Mon open (holidays
@@ -65,11 +67,26 @@ def _custom_fills(df: pd.DataFrame, entry_dow: int, exit_dow: int) -> list:
     return out
 
 
-def _fills(df: pd.DataFrame, strategy: str, entry_dow: int = 3, exit_dow: int = 0
-           ) -> list[tuple[pd.Timestamp, str, str]]:
+def _breakout_fills(df: pd.DataFrame, n: int, hold: int) -> list:
+    c = df["close"]
+    new_high = (c >= c.rolling(n).max()) & c.rolling(n).max().notna()
+    dates, out, i = df.index, [], 0
+    while i < len(dates) - hold:
+        if new_high.iloc[i]:
+            out += [(dates[i], "close", "buy"), (dates[i + hold], "close", "sell")]
+            i += hold + 1
+        else:
+            i += 1
+    return out
+
+
+def _fills(df: pd.DataFrame, strategy: str, entry_dow: int = 3, exit_dow: int = 0,
+           breakout_n: int = 20, hold_bars: int = 5) -> list[tuple[pd.Timestamp, str, str]]:
     """(date, 'open'|'close', 'buy'|'sell') in time order."""
     if strategy == "custom":
         return _custom_fills(df, entry_dow, exit_dow)
+    if strategy == "breakout":
+        return _breakout_fills(df, breakout_n, hold_bars)
     if strategy == "buy_hold":
         return [(df.index[0], "open", "buy"), (df.index[-1], "close", "sell")]
     out = []
@@ -131,9 +148,10 @@ def _trend_gate(df: pd.DataFrame, fills: list, strategy: str, sma: int) -> list:
 
 def run(df: pd.DataFrame, strategy: str, expense_ratio: float = 0.0,
         slippage: float = 0.0, start_cash: float = 10_000.0,
-        entry_dow: int = 3, exit_dow: int = 0, sma: int = 0) -> dict:
+        entry_dow: int = 3, exit_dow: int = 0, sma: int = 0,
+        breakout_n: int = 20, hold_bars: int = 5) -> dict:
     df = _prepare(df)
-    fills = _fills(df, strategy, entry_dow, exit_dow)
+    fills = _fills(df, strategy, entry_dow, exit_dow, breakout_n, hold_bars)
     if sma:
         fills = _trend_gate(df, fills, strategy, sma)
     by_day: dict[pd.Timestamp, list] = {}
