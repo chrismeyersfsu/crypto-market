@@ -13,6 +13,11 @@ six hours. Three rules are marked to market every bar:
 - **buy_hold** — first open to last close
 - **weekday** — Mon open → Fri close (first/last trading day of the week), flat over the weekend
 - **weekend** — Fri close → Mon open, flat during the week
+- **custom** — close of one weekday to close of another, once a week (default
+  Thu → Mon; wraps the weekend when exit ≤ entry)
+
+An optional split date reports every rule's stats before and after it, so a
+rule picked on old data can be tracked forward.
 
 Costs: $0 commission, optional per-side slippage, and an expense ratio accrued
 per calendar day held. ETF prices already embed their own expense ratio; the

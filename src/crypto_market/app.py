@@ -52,6 +52,9 @@ def run_backtest(
     end: str | None = None,
     expense_ratio: float = Query(0.25, ge=0, le=5, description="percent per year"),
     slippage: float = Query(0.0, ge=0, le=5, description="percent per side"),
+    entry_dow: int = Query(3, ge=0, le=4, description="custom: buy at this weekday's close (Mon=0)"),
+    exit_dow: int = Query(0, ge=0, le=4, description="custom: sell at this weekday's close"),
+    split: str | None = Query(None, description="in-sample before this date, out-of-sample from it"),
 ):
     try:
         df = data.load(ticker)
@@ -65,12 +68,26 @@ def run_backtest(
         raise HTTPException(400, f"{ticker}: only {len(df)} bars in range")
 
     er, sl = expense_ratio / 100, slippage / 100
-    results = {s: backtest.run(df, s, er, sl) for s in backtest.STRATEGIES}
+    results = {s: backtest.run(df, s, er, sl, entry_dow=entry_dow, exit_dow=exit_dow)
+               for s in backtest.STRATEGIES}
     dates = [d.date().isoformat() for d in df.index]
     series = {s: [round(v, 2) for v in r["equity"]] for s, r in results.items()}
     stats = {s: {k: _clean(v) for k, v in backtest.stats(r["equity"], r["trades"]).items()}
              for s, r in results.items()}
     wd, we = results["weekday"]["trades"], results["weekend"]["trades"]
+
+    # Same equity paths, cut at the split: each half re-based to its own start
+    # so the before/after stats are comparable.
+    sample = None
+    if split:
+        cut = pd.Timestamp(split)
+        sample = {}
+        for s, r in results.items():
+            eq, tr = r["equity"], r["trades"]
+            halves = {"in": (eq[eq.index < cut], tr[tr["exit"] < split] if len(tr) else tr),
+                      "out": (eq[eq.index >= cut], tr[tr["exit"] >= split] if len(tr) else tr)}
+            sample[s] = {k: {kk: _clean(v) for kk, v in backtest.stats(e, t).items()}
+                         for k, (e, t) in halves.items()}
     dow = backtest.day_of_week(df)
     return {
         "meta": df.attrs["meta"] | {"first": dates[0], "last": dates[-1], "bars": len(df)},
@@ -84,7 +101,8 @@ def run_backtest(
              "n": int(r["n"]), "win_rate": _clean(float(r["win_rate"]))}
             for i, r in dow.iterrows()
         ],
-        "trades": {s: results[s]["trades"].to_dict("records") for s in ("weekday", "weekend")},
+        "sample": sample,
+        "trades": {s: results[s]["trades"].to_dict("records") for s in ("weekday", "weekend", "custom")},
     }
 
 

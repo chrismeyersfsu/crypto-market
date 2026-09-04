@@ -1,10 +1,13 @@
-"""Three holding rules on one daily series, marked to market every bar.
+"""Four holding rules on one daily series, marked to market every bar.
 
   buy_hold  in from the first open to the last close
   weekday   in from the week's first bar (open) to its last bar (close);
             flat over the weekend
   weekend   in from the week's last bar (close) to the next week's first
             bar (open); flat during the week
+  custom    in from the close of weekday `entry_dow` to the close of weekday
+            `exit_dow`, once a week; wraps over the weekend when exit <= entry
+            (Thu -> Mon), and a holiday pushes a fill to the next bar
 
 Bars on Sat/Sun (crypto spot) are never fill days, so on every series
 weekday = Mon open -> Fri close and weekend = Fri close -> Mon open (holidays
@@ -22,7 +25,7 @@ import math
 import numpy as np
 import pandas as pd
 
-STRATEGIES = ("buy_hold", "weekday", "weekend")
+STRATEGIES = ("buy_hold", "weekday", "weekend", "custom")
 
 
 def _prepare(df: pd.DataFrame) -> pd.DataFrame:
@@ -39,8 +42,34 @@ def _prepare(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _fills(df: pd.DataFrame, strategy: str) -> list[tuple[pd.Timestamp, str, str]]:
+def _custom_fills(df: pd.DataFrame, entry_dow: int, exit_dow: int) -> list:
+    delta = (exit_dow - entry_dow) % 7 or 7
+    dates = df.index
+    out = []
+    # Walk week by week from the Monday of the first bar.
+    monday = dates[0] - pd.Timedelta(days=dates[0].dayofweek)
+    last_exit = None
+    while monday <= dates[-1]:
+        target = monday + pd.Timedelta(days=entry_dow)
+        i = dates.searchsorted(target)
+        # Enter on the first bar on/after the target (holiday -> next bar),
+        # but not one that already belongs to the following week or that
+        # falls before the previous leg closed.
+        if i < len(dates) and dates[i] < target + pd.Timedelta(days=7) \
+                and (last_exit is None or dates[i] > last_exit):
+            j = dates.searchsorted(dates[i] + pd.Timedelta(days=delta))
+            if j < len(dates):
+                out += [(dates[i], "close", "buy"), (dates[j], "close", "sell")]
+                last_exit = dates[j]
+        monday += pd.Timedelta(days=7)
+    return out
+
+
+def _fills(df: pd.DataFrame, strategy: str, entry_dow: int = 3, exit_dow: int = 0
+           ) -> list[tuple[pd.Timestamp, str, str]]:
     """(date, 'open'|'close', 'buy'|'sell') in time order."""
+    if strategy == "custom":
+        return _custom_fills(df, entry_dow, exit_dow)
     if strategy == "buy_hold":
         return [(df.index[0], "open", "buy"), (df.index[-1], "close", "sell")]
     out = []
@@ -68,10 +97,11 @@ def _fills(df: pd.DataFrame, strategy: str) -> list[tuple[pd.Timestamp, str, str
 
 
 def run(df: pd.DataFrame, strategy: str, expense_ratio: float = 0.0,
-        slippage: float = 0.0, start_cash: float = 10_000.0) -> dict:
+        slippage: float = 0.0, start_cash: float = 10_000.0,
+        entry_dow: int = 3, exit_dow: int = 0) -> dict:
     df = _prepare(df)
     by_day: dict[pd.Timestamp, list] = {}
-    for d, when, side in _fills(df, strategy):
+    for d, when, side in _fills(df, strategy, entry_dow, exit_dow):
         by_day.setdefault(d, []).append((when, side))
 
     daily_decay = (1.0 - expense_ratio) ** (1.0 / 365.0)
@@ -101,6 +131,8 @@ def run(df: pd.DataFrame, strategy: str, expense_ratio: float = 0.0,
 
 
 def stats(equity: pd.Series, trades: pd.DataFrame) -> dict:
+    if len(equity) < 2:
+        return {"trades": 0}
     days = (equity.index[-1] - equity.index[0]).days
     years = max(days / 365.25, 1e-9)
     total = equity.iloc[-1] / equity.iloc[0] - 1

@@ -9,13 +9,13 @@
     color-scheme: light;
     --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
     --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,.10);
-    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --good: #006300; --bad: #d03b3b;
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --good: #006300; --bad: #d03b3b;
   }
   @media (prefers-color-scheme: dark) { :root {
     color-scheme: dark;
     --page: #0d0d0d; --surface: #1a1a19; --ink: #fff; --ink-2: #c3c2b7; --muted: #898781;
     --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,.10);
-    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --good: #0ca30c; --bad: #e66767;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --good: #0ca30c; --bad: #e66767;
   } }
   * { box-sizing: border-box }
   body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif }
@@ -36,7 +36,7 @@
   th { color: var(--muted); font-weight: 500; font-size: 12px }
   .pos { color: var(--good) } .neg { color: var(--bad) }
   .verdict { font-size: 15px; margin: 0 0 6px } .verdict b { font-weight: 600 }
-  details summary { cursor: pointer; color: var(--ink-2) } .tables { display: grid; grid-template-columns: 1fr 1fr; gap: 16px } @media (max-width: 720px) { .tables { grid-template-columns: 1fr } }
+  details summary { cursor: pointer; color: var(--ink-2) } .tables { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px } @media (max-width: 720px) { .tables { grid-template-columns: 1fr } }
   .err { color: var(--bad) }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px }
   .tile { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px } .tile .k { font-size: 12px; color: var(--muted) } .tile .v { font-size: 22px; font-weight: 600 }
@@ -54,6 +54,9 @@
     <label>End <input type="date" id="end"></label>
     <label>Expense ratio %/yr <input type="number" id="er" value="0.25" step="0.05" min="0"></label>
     <label>Slippage %/side <input type="number" id="slip" value="0" step="0.01" min="0"></label>
+    <label>Custom: buy at close of <select id="entry"><option value="0">Mon</option><option value="1">Tue</option><option value="2">Wed</option><option value="3" selected>Thu</option><option value="4">Fri</option></select></label>
+    <label>sell at close of <select id="exit"><option value="0" selected>Mon</option><option value="1">Tue</option><option value="2">Wed</option><option value="3">Thu</option><option value="4">Fri</option></select></label>
+    <label>Out-of-sample from <input type="date" id="split"></label>
     <label>Scale <select id="scale"><option value="linear">linear</option><option value="logarithmic">log</option></select></label>
     <button class="primary">Run</button>
     <span id="status" class="hint"></span>
@@ -71,6 +74,7 @@
       <span style="--c:var(--s1)">Buy &amp; hold</span>
       <span style="--c:var(--s2)">Weekday only (Mon open → Fri close)</span>
       <span style="--c:var(--s3)">Weekend only (Fri close → Mon open)</span>
+      <span style="--c:var(--s4)" id="customLegend">Custom</span>
     </div>
     <div class="chart"><canvas id="eq"></canvas></div>
   </div>
@@ -79,6 +83,12 @@
     <h2>Strategy comparison</h2>
     <p class="hint">CAGR and volatility annualised on calendar time. t-stat: mean leg return vs zero (|t| ≳ 2 is roughly the 5% bar).</p>
     <table id="stats"></table>
+  </div>
+
+  <div class="card" id="sampleCard" hidden>
+    <h2>In-sample vs out-of-sample</h2>
+    <p class="hint" id="sampleHint">A rule found on the first period should keep working on the second. Set the split to the day you start paper-trading and revisit.</p>
+    <table id="sample"></table>
   </div>
 
   <div class="card">
@@ -92,6 +102,7 @@
       <div class="tables">
         <div><h2>Weekday legs</h2><table id="tWeekday"></table></div>
         <div><h2>Weekend legs</h2><table id="tWeekend"></table></div>
+        <div><h2>Custom legs</h2><table id="tCustom"></table></div>
       </div>
     </details>
   </div>
@@ -105,7 +116,7 @@ const money = v => v == null ? "–" : "$" + Math.round(v).toLocaleString();
 const num = (v, d = 2) => v == null ? "–" : v.toFixed(d);
 const signCls = v => v == null ? "" : v >= 0 ? "pos" : "neg";
 const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const NAMES = { buy_hold: "Buy & hold", weekday: "Weekday only", weekend: "Weekend only" };
+const NAMES = { buy_hold: "Buy & hold", weekday: "Weekday only", weekend: "Weekend only", custom: "Custom" };
 let eqChart, dowChart;
 
 Chart.defaults.color = css("--muted");
@@ -126,8 +137,8 @@ async function loadTickers() {
 
 function params() {
   const g = id => document.getElementById(id).value;
-  const p = new URLSearchParams({ ticker: g("custom").trim() || g("ticker"), expense_ratio: g("er") || 0, slippage: g("slip") || 0 });
-  if (g("start")) p.set("start", g("start")); if (g("end")) p.set("end", g("end"));
+  const p = new URLSearchParams({ ticker: g("custom").trim() || g("ticker"), expense_ratio: g("er") || 0, slippage: g("slip") || 0, entry_dow: g("entry"), exit_dow: g("exit") });
+  if (g("start")) p.set("start", g("start")); if (g("end")) p.set("end", g("end")); if (g("split")) p.set("split", g("split"));
   return p;
 }
 
@@ -147,9 +158,11 @@ function render(d) {
   document.getElementById("meta").textContent = `${m.name || m.symbol} · ${m.first} → ${m.last} · ${m.bars} bars`;
   const s = d.stats, scale = document.getElementById("scale").value;
   const isSpot = /-USD$/.test(m.symbol);
+  const customName = `${DOW[+document.getElementById("entry").value]} close → ${DOW[+document.getElementById("exit").value]} close`;
+  NAMES.custom = customName; document.getElementById("customLegend").textContent = customName;
 
   // Verdict + tiles
-  const wd = s.weekday, we = s.weekend, bh = s.buy_hold;
+  const wd = s.weekday, we = s.weekend, bh = s.buy_hold, cu = s.custom;
   const vc = document.getElementById("verdictCard"); vc.hidden = false;
   const t = d.weekday_vs_weekend_t;
   const beat = wd.total_return > bh.total_return;
@@ -163,10 +176,11 @@ function render(d) {
     ["Buy & hold CAGR", pct(bh.cagr), bh.cagr], ["Weekday CAGR", pct(wd.cagr), wd.cagr], ["Weekend CAGR", pct(we.cagr), we.cagr],
     ["Max drawdown (B&H → weekday)", `${pct(bh.max_drawdown, 0)} → ${pct(wd.max_drawdown, 0)}`, null],
     ["Weekday legs / win rate", `${wd.trades} / ${pct(wd.win_rate, 0)}`, null],
+    [`${customName} CAGR / maxDD`, `${pct(cu.cagr)} / ${pct(cu.max_drawdown, 0)}`, cu.cagr],
   ].map(([k, v, sg]) => `<div class="tile"><div class="k">${k}</div><div class="v ${signCls(sg)}">${v}</div></div>`).join("");
 
   // Equity chart
-  const colors = { buy_hold: css("--s1"), weekday: css("--s2"), weekend: css("--s3") };
+  const colors = { buy_hold: css("--s1"), weekday: css("--s2"), weekend: css("--s3"), custom: css("--s4") };
   const ds = Object.keys(NAMES).map(k => ({ label: NAMES[k], data: d.equity[k], borderColor: colors[k], borderWidth: 2, pointRadius: 0, pointHitRadius: 8, tension: 0 }));
   eqChart?.destroy();
   eqChart = new Chart(document.getElementById("eq"), {
@@ -188,6 +202,19 @@ function render(d) {
   document.getElementById("stats").innerHTML = `<tr><th></th>${Object.values(NAMES).map(n => `<th>${n}</th>`).join("")}</tr>` +
     rows.map(([lab, f, sg]) => `<tr><td>${lab}</td>${Object.keys(NAMES).map(k => `<td class="${sg ? signCls(sg(k)) : ""}">${f(k)}</td>`).join("")}</tr>`).join("");
 
+  // In-sample / out-of-sample
+  const sc = document.getElementById("sampleCard");
+  if (d.sample) {
+    sc.hidden = false;
+    const split = document.getElementById("split").value;
+    document.getElementById("sampleHint").textContent = `Before ${split} vs from ${split} on. Each half re-based to its own start.`;
+    const cols = [["CAGR", "cagr", v => pct(v)], ["Max DD", "max_drawdown", v => pct(v, 0)], ["Return / vol", "sharpe", v => num(v)], ["Legs", "trades", v => v == null ? "–" : v], ["Avg leg", "avg_trade", v => pct(v, 3)], ["t-stat", "t_stat", v => num(v)]];
+    document.getElementById("sample").innerHTML =
+      `<tr><th></th>${cols.map(c => `<th colspan="2">${c[0]}</th>`).join("")}</tr>` +
+      `<tr><th></th>${cols.map(() => "<th>in</th><th>out</th>").join("")}</tr>` +
+      Object.keys(NAMES).map(k => `<tr><td>${NAMES[k]}</td>${cols.map(([, key, f]) => ["in", "out"].map(h => { const v = k === "buy_hold" && ["trades", "avg_trade", "t_stat"].includes(key) ? null : d.sample[k][h][key]; return `<td class="${["cagr","avg_trade"].includes(key) ? signCls(v) : ""}">${f(v)}</td>`; }).join("")).join("")}</tr>`).join("");
+  } else sc.hidden = true;
+
   // Day-of-week chart
   const dow = d.day_of_week;
   dowChart?.destroy();
@@ -199,7 +226,7 @@ function render(d) {
   });
 
   // Leg tables
-  for (const [k, id] of [["weekday", "tWeekday"], ["weekend", "tWeekend"]]) {
+  for (const [k, id] of [["weekday", "tWeekday"], ["weekend", "tWeekend"], ["custom", "tCustom"]]) {
     const tr = d.trades[k];
     document.getElementById(id).innerHTML = "<tr><th>Entry</th><th>Exit</th><th>Days</th><th>Return</th></tr>" +
       tr.slice().reverse().map(x => `<tr><td>${x.entry}</td><td>${x.exit}</td><td>${x.days}</td><td class="${signCls(x.ret)}">${pct(x.ret, 2)}</td></tr>`).join("");
@@ -210,7 +237,7 @@ document.getElementById("f").addEventListener("submit", run);
 document.getElementById("scale").addEventListener("change", () => eqChart && (eqChart.options.scales.y.type = document.getElementById("scale").value, eqChart.update()));
 loadTickers().then(() => {
   const q = new URLSearchParams(location.search);
-  for (const [k, id] of [["ticker", "ticker"], ["start", "start"], ["end", "end"], ["expense_ratio", "er"], ["slippage", "slip"]]) if (q.has(k)) document.getElementById(id).value = q.get(k);
+  for (const [k, id] of [["ticker", "ticker"], ["start", "start"], ["end", "end"], ["expense_ratio", "er"], ["slippage", "slip"], ["entry_dow", "entry"], ["exit_dow", "exit"], ["split", "split"]]) if (q.has(k)) document.getElementById(id).value = q.get(k);
   run();
 });
 </script>
