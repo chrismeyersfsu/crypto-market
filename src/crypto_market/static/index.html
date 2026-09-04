@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weekday vs Weekend</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,.10);
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --good: #006300; --bad: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) { :root {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #fff; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,.10);
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --good: #0ca30c; --bad: #e66767;
+  } }
+  * { box-sizing: border-box }
+  body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px }
+  h1 { font-size: 20px; margin: 0 0 4px } .sub { color: var(--ink-2); margin: 0 0 16px }
+  form { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: end; margin-bottom: 16px }
+  label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--ink-2) }
+  input, select, button { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px }
+  input[type=number] { width: 7em } input[type=date] { width: 11em }
+  button { cursor: pointer } button.primary { background: var(--s1); color: #fff; border-color: transparent }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px }
+  .card h2 { font-size: 14px; margin: 0 0 2px } .card .hint { color: var(--muted); font-size: 12px; margin: 0 0 10px }
+  .chart { position: relative; height: 340px } .chart.short { height: 220px }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--ink-2); margin-bottom: 8px }
+  .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; background: var(--c) }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums }
+  th, td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--grid) } th:first-child, td:first-child { text-align: left }
+  th { color: var(--muted); font-weight: 500; font-size: 12px }
+  .pos { color: var(--good) } .neg { color: var(--bad) }
+  .verdict { font-size: 15px; margin: 0 0 6px } .verdict b { font-weight: 600 }
+  details summary { cursor: pointer; color: var(--ink-2) } .tables { display: grid; grid-template-columns: 1fr 1fr; gap: 16px } @media (max-width: 720px) { .tables { grid-template-columns: 1fr } }
+  .err { color: var(--bad) }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px }
+  .tile { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px } .tile .k { font-size: 12px; color: var(--muted) } .tile .v { font-size: 22px; font-weight: 600 }
+</style>
+</head>
+<body>
+<main>
+  <h1>Weekday vs weekend holding</h1>
+  <p class="sub">Does "buy during the week, sell for the weekend" beat holding? Fills at the open/close of the first and last trading day of each week, $0 commission, expense ratio accrued per calendar day held.</p>
+
+  <form id="f">
+    <label>Ticker <select id="ticker"></select></label>
+    <label>Custom <input id="custom" placeholder="e.g. ETHE" size="8"></label>
+    <label>Start <input type="date" id="start"></label>
+    <label>End <input type="date" id="end"></label>
+    <label>Expense ratio %/yr <input type="number" id="er" value="0.25" step="0.05" min="0"></label>
+    <label>Slippage %/side <input type="number" id="slip" value="0" step="0.01" min="0"></label>
+    <label>Scale <select id="scale"><option value="linear">linear</option><option value="logarithmic">log</option></select></label>
+    <button class="primary">Run</button>
+    <span id="status" class="hint"></span>
+  </form>
+
+  <div class="card" id="verdictCard" hidden>
+    <p class="verdict" id="verdict"></p>
+    <div class="tiles" id="tiles"></div>
+  </div>
+
+  <div class="card">
+    <h2>Growth of $10,000</h2>
+    <p class="hint" id="meta"></p>
+    <div class="legend">
+      <span style="--c:var(--s1)">Buy &amp; hold</span>
+      <span style="--c:var(--s2)">Weekday only (Mon open → Fri close)</span>
+      <span style="--c:var(--s3)">Weekend only (Fri close → Mon open)</span>
+    </div>
+    <div class="chart"><canvas id="eq"></canvas></div>
+  </div>
+
+  <div class="card">
+    <h2>Strategy comparison</h2>
+    <p class="hint">CAGR and volatility annualised on calendar time. t-stat: mean leg return vs zero (|t| ≳ 2 is roughly the 5% bar).</p>
+    <table id="stats"></table>
+  </div>
+
+  <div class="card">
+    <h2>Average close-to-close return by weekday</h2>
+    <p class="hint">Spot series include Sat/Sun; ETFs only have trading days. Bars show the mean; hover for median, win rate and sample size.</p>
+    <div class="chart short"><canvas id="dow"></canvas></div>
+  </div>
+
+  <div class="card">
+    <details><summary>Individual legs (table view)</summary>
+      <div class="tables">
+        <div><h2>Weekday legs</h2><table id="tWeekday"></table></div>
+        <div><h2>Weekend legs</h2><table id="tWeekend"></table></div>
+      </div>
+    </details>
+  </div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const pct = (v, d = 1) => v == null ? "–" : (v * 100).toFixed(d) + "%";
+const money = v => v == null ? "–" : "$" + Math.round(v).toLocaleString();
+const num = (v, d = 2) => v == null ? "–" : v.toFixed(d);
+const signCls = v => v == null ? "" : v >= 0 ? "pos" : "neg";
+const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const NAMES = { buy_hold: "Buy & hold", weekday: "Weekday only", weekend: "Weekend only" };
+let eqChart, dowChart;
+
+Chart.defaults.color = css("--muted");
+Chart.defaults.borderColor = css("--grid");
+Chart.defaults.font.family = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+Chart.defaults.plugins.tooltip.backgroundColor = css("--surface");
+Chart.defaults.plugins.tooltip.titleColor = css("--ink");
+Chart.defaults.plugins.tooltip.bodyColor = css("--ink-2");
+Chart.defaults.plugins.tooltip.borderColor = css("--border");
+Chart.defaults.plugins.tooltip.borderWidth = 1;
+
+async function loadTickers() {
+  const sel = document.getElementById("ticker");
+  for (const t of await (await fetch("/api/tickers")).json()) {
+    const o = document.createElement("option"); o.value = t.symbol; o.textContent = `${t.symbol} — ${t.name}`; sel.append(o);
+  }
+}
+
+function params() {
+  const g = id => document.getElementById(id).value;
+  const p = new URLSearchParams({ ticker: g("custom").trim() || g("ticker"), expense_ratio: g("er") || 0, slippage: g("slip") || 0 });
+  if (g("start")) p.set("start", g("start")); if (g("end")) p.set("end", g("end"));
+  return p;
+}
+
+async function run(e) {
+  e && e.preventDefault();
+  const status = document.getElementById("status");
+  status.textContent = "loading…"; status.className = "hint";
+  const r = await fetch("/api/backtest?" + params());
+  if (!r.ok) { status.textContent = (await r.json()).detail; status.className = "err"; return; }
+  const d = await r.json(); status.textContent = "";
+  history.replaceState(null, "", "?" + params());
+  render(d);
+}
+
+function render(d) {
+  const m = d.meta;
+  document.getElementById("meta").textContent = `${m.name || m.symbol} · ${m.first} → ${m.last} · ${m.bars} bars`;
+  const s = d.stats, scale = document.getElementById("scale").value;
+  const isSpot = /-USD$/.test(m.symbol);
+
+  // Verdict + tiles
+  const wd = s.weekday, we = s.weekend, bh = s.buy_hold;
+  const vc = document.getElementById("verdictCard"); vc.hidden = false;
+  const t = d.weekday_vs_weekend_t;
+  const beat = wd.total_return > bh.total_return;
+  document.getElementById("verdict").innerHTML =
+    `Weekday-only turned $10k into <b>${money(wd.final)}</b> vs <b>${money(bh.final)}</b> for buy &amp; hold` +
+    ` (${beat ? "ahead" : "behind"} by ${pct(Math.abs(wd.total_return - bh.total_return), 0)} pts). ` +
+    `The weekend legs it skipped averaged <b class="${signCls(we.avg_trade)}">${pct(we.avg_trade, 3)}</b> each` +
+    (t == null ? "." : `; weekday vs weekend leg difference t = <b>${num(t)}</b> ${Math.abs(t) >= 2 ? "(statistically meaningful)" : "(within noise)"}.`) +
+    (isSpot || !(+document.getElementById("er").value) ? "" : " ETF prices already embed their expense ratio, so the drag here is on top of it — set it to 0 for a pure comparison.");
+  document.getElementById("tiles").innerHTML = [
+    ["Buy & hold CAGR", pct(bh.cagr), bh.cagr], ["Weekday CAGR", pct(wd.cagr), wd.cagr], ["Weekend CAGR", pct(we.cagr), we.cagr],
+    ["Max drawdown (B&H → weekday)", `${pct(bh.max_drawdown, 0)} → ${pct(wd.max_drawdown, 0)}`, null],
+    ["Weekday legs / win rate", `${wd.trades} / ${pct(wd.win_rate, 0)}`, null],
+  ].map(([k, v, sg]) => `<div class="tile"><div class="k">${k}</div><div class="v ${signCls(sg)}">${v}</div></div>`).join("");
+
+  // Equity chart
+  const colors = { buy_hold: css("--s1"), weekday: css("--s2"), weekend: css("--s3") };
+  const ds = Object.keys(NAMES).map(k => ({ label: NAMES[k], data: d.equity[k], borderColor: colors[k], borderWidth: 2, pointRadius: 0, pointHitRadius: 8, tension: 0 }));
+  eqChart?.destroy();
+  eqChart = new Chart(document.getElementById("eq"), {
+    type: "line", data: { labels: d.dates, datasets: ds },
+    options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${money(c.parsed.y)}` } } },
+      scales: { x: { ticks: { maxTicksLimit: 8, maxRotation: 0 }, grid: { display: false } },
+                y: { type: scale, ticks: { callback: v => money(v), maxTicksLimit: 7 }, grid: { color: css("--grid") } } } }
+  });
+
+  // Stats table
+  const rows = [
+    ["Final value", k => money(s[k].final)], ["Total return", k => pct(s[k].total_return, 0), k => s[k].total_return],
+    ["CAGR", k => pct(s[k].cagr), k => s[k].cagr], ["Max drawdown", k => pct(s[k].max_drawdown, 0), k => s[k].max_drawdown],
+    ["Volatility (ann.)", k => pct(s[k].volatility, 0)], ["Return / vol", k => num(s[k].sharpe)],
+    ["Legs", k => s[k].trades], ["Win rate", k => pct(s[k].win_rate, 0)], ["Avg leg", k => pct(s[k].avg_trade, 3), k => s[k].avg_trade],
+    ["Median leg", k => pct(s[k].median_trade, 3), k => s[k].median_trade], ["t-stat (mean leg vs 0)", k => num(s[k].t_stat)],
+  ];
+  document.getElementById("stats").innerHTML = `<tr><th></th>${Object.values(NAMES).map(n => `<th>${n}</th>`).join("")}</tr>` +
+    rows.map(([lab, f, sg]) => `<tr><td>${lab}</td>${Object.keys(NAMES).map(k => `<td class="${sg ? signCls(sg(k)) : ""}">${f(k)}</td>`).join("")}</tr>`).join("");
+
+  // Day-of-week chart
+  const dow = d.day_of_week;
+  dowChart?.destroy();
+  dowChart = new Chart(document.getElementById("dow"), {
+    type: "bar", data: { labels: dow.map(r => DOW[r.dow]), datasets: [{ data: dow.map(r => r.mean * 100), backgroundColor: css("--s1"), borderRadius: 4, borderSkipped: "start", maxBarThickness: 48 }] },
+    options: { responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => { const r = dow[c.dataIndex]; return [` mean ${num(r.mean * 100, 3)}%`, ` median ${num(r.median * 100, 3)}%`, ` win rate ${pct(r.win_rate, 0)}`, ` n = ${r.n}`]; } } } },
+      scales: { x: { grid: { display: false } }, y: { ticks: { callback: v => v.toFixed(2) + "%" }, grid: { color: css("--grid") } } } }
+  });
+
+  // Leg tables
+  for (const [k, id] of [["weekday", "tWeekday"], ["weekend", "tWeekend"]]) {
+    const tr = d.trades[k];
+    document.getElementById(id).innerHTML = "<tr><th>Entry</th><th>Exit</th><th>Days</th><th>Return</th></tr>" +
+      tr.slice().reverse().map(x => `<tr><td>${x.entry}</td><td>${x.exit}</td><td>${x.days}</td><td class="${signCls(x.ret)}">${pct(x.ret, 2)}</td></tr>`).join("");
+  }
+}
+
+document.getElementById("f").addEventListener("submit", run);
+document.getElementById("scale").addEventListener("change", () => eqChart && (eqChart.options.scales.y.type = document.getElementById("scale").value, eqChart.update()));
+loadTickers().then(() => {
+  const q = new URLSearchParams(location.search);
+  for (const [k, id] of [["ticker", "ticker"], ["start", "start"], ["end", "end"], ["expense_ratio", "er"], ["slippage", "slip"]]) if (q.has(k)) document.getElementById(id).value = q.get(k);
+  run();
+});
+</script>
+</body>
+</html>

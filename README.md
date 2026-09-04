@@ -1,1 +1,19 @@
 # crypto-market
+
+Backtests "buy during the week, sell for the weekend" against buy-and-hold on
+the crypto ETFs a Fidelity 401(k) BrokerageLink account can trade (FBTC, FETH,
+IBIT, …) and on BTC/ETH spot.
+
+    uv sync
+    uv run crypto-market        # http://127.0.0.1:8870
+
+Daily bars come from Yahoo Finance (no key) and are cached under `data/` for
+six hours. Three rules are marked to market every bar:
+
+- **buy_hold** — first open to last close
+- **weekday** — Mon open → Fri close (first/last trading day of the week), flat over the weekend
+- **weekend** — Fri close → Mon open, flat during the week
+
+Costs: $0 commission, optional per-side slippage, and an expense ratio accrued
+per calendar day held. ETF prices already embed their own expense ratio; the
+input exists so spot BTC/ETH can be compared as if held through a 0.25% fund.

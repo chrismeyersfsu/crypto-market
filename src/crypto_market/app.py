@@ -1,0 +1,93 @@
+"""FastAPI: one page, one JSON endpoint."""
+from __future__ import annotations
+
+import math
+from pathlib import Path
+
+import pandas as pd
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
+
+from . import backtest, data
+
+app = FastAPI(title="crypto-market")
+STATIC = Path(__file__).parent / "static"
+
+# What a Fidelity 401(k) BrokerageLink account can actually trade.
+# FBTC/FETH carry the 0.25% expense ratio the strategy assumes.
+TICKERS = [
+    ("FBTC", "Fidelity Wise Origin Bitcoin Fund (0.25%)"),
+    ("FETH", "Fidelity Ethereum Fund (0.25%)"),
+    ("IBIT", "iShares Bitcoin Trust (0.25%)"),
+    ("ETHA", "iShares Ethereum Trust (0.25%)"),
+    ("BITO", "ProShares Bitcoin Strategy ETF (0.95%)"),
+    ("GBTC", "Grayscale Bitcoin Trust (1.5%)"),
+    ("BTC-USD", "Bitcoin spot (trades weekends)"),
+    ("ETH-USD", "Ether spot (trades weekends)"),
+    ("MSTR", "Strategy Inc"),
+    ("COIN", "Coinbase"),
+]
+
+
+def _clean(v):
+    if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+        return None
+    return v
+
+
+@app.get("/")
+def index():
+    return FileResponse(STATIC / "index.html")
+
+
+@app.get("/api/tickers")
+def tickers():
+    return [{"symbol": s, "name": n} for s, n in TICKERS]
+
+
+@app.get("/api/backtest")
+def run_backtest(
+    ticker: str = Query("FBTC"),
+    start: str | None = None,
+    end: str | None = None,
+    expense_ratio: float = Query(0.25, ge=0, le=5, description="percent per year"),
+    slippage: float = Query(0.0, ge=0, le=5, description="percent per side"),
+):
+    try:
+        df = data.load(ticker)
+    except Exception as e:  # bad symbol, Yahoo hiccup
+        raise HTTPException(400, f"{ticker}: {e}")
+    if start:
+        df = df[df.index >= pd.Timestamp(start)]
+    if end:
+        df = df[df.index <= pd.Timestamp(end)]
+    if len(df) < 10:
+        raise HTTPException(400, f"{ticker}: only {len(df)} bars in range")
+
+    er, sl = expense_ratio / 100, slippage / 100
+    results = {s: backtest.run(df, s, er, sl) for s in backtest.STRATEGIES}
+    dates = [d.date().isoformat() for d in df.index]
+    series = {s: [round(v, 2) for v in r["equity"]] for s, r in results.items()}
+    stats = {s: {k: _clean(v) for k, v in backtest.stats(r["equity"], r["trades"]).items()}
+             for s, r in results.items()}
+    wd, we = results["weekday"]["trades"], results["weekend"]["trades"]
+    dow = backtest.day_of_week(df)
+    return {
+        "meta": df.attrs["meta"] | {"first": dates[0], "last": dates[-1], "bars": len(df)},
+        "dates": dates,
+        "close": [round(v, 4) for v in df["close"]],
+        "equity": series,
+        "stats": stats,
+        "weekday_vs_weekend_t": _clean(backtest.welch_t(wd["ret"], we["ret"]) if len(wd) and len(we) else float("nan")),
+        "day_of_week": [
+            {"dow": int(i), "mean": _clean(float(r["mean"])), "median": _clean(float(r["median"])),
+             "n": int(r["n"]), "win_rate": _clean(float(r["win_rate"]))}
+            for i, r in dow.iterrows()
+        ],
+        "trades": {s: results[s]["trades"].to_dict("records") for s in ("weekday", "weekend")},
+    }
+
+
+def main():
+    import uvicorn
+    uvicorn.run("crypto_market.app:app", host="127.0.0.1", port=8870)
