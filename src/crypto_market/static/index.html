@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Coinbase triangles</title>
+<title>Exchange triangles</title>
 <style>
   :root {
     color-scheme: light;
@@ -46,17 +46,18 @@
 <body>
 <main>
   <section id="viewCb">
-  <h1>Coinbase triangles: do its own three prices ever disagree — for long enough to catch?</h1>
-  <p class="sub">Every coin Coinbase lists both in dollars and in BTC, ETH or USDT is a triangle: its three prices should agree (<code>X/USD == X/Q × Q/USD</code>). When they don't, three trades in a loop — dollars → coin → bridge → dollars, or the reverse — end with more dollars than they started with, before fees. Nothing leaves the exchange and no second account is involved; the cost is three fees and whatever has moved by the time the orders land. This server keeps every one of those order books from Coinbase's own feed and re-prices both loops of every triangle each time one of its three books changes, so the numbers below are what a bot sitting on the same feed would have seen, down to the millisecond.</p>
+  <h1>Triangles: do an exchange's own three prices ever disagree — for long enough to catch?</h1>
+  <p class="sub">Every coin an exchange lists both in dollars and in a bridge currency (BTC, ETH, USDT, and on Binance.US also USDC) is a triangle: its three prices should agree (<code>X/USD == X/Q × Q/USD</code>). When they don't, three trades in a loop — dollars → coin → bridge → dollars, or the reverse — end with more dollars than they started with, before fees. Nothing leaves the exchange and no second account is involved; the cost is three fees and whatever has moved by the time the orders land. This server watches every one of those markets on the exchange's own feed — Coinbase's full order books, Binance.US's best bid and ask — and re-prices both loops of every triangle each time one of its three markets changes, so the numbers below are what a bot sitting on the same feed would have seen, down to the millisecond. Pick a venue and click Run.</p>
   <form id="fCb">
+    <label>Venue <select id="cVenue"><option value="coinbase">Coinbase</option><option value="binanceus">Binance.US</option></select></label>
     <label>Fee per fill, ordinary pair (bp) <input type="number" id="cFee" value="60" step="1" min="0" max="200"></label>
-    <label>Fee per fill, stable pair (bp) <input type="number" id="cStable" value="60" step="0.5" min="0" max="200"></label>
+    <label><span id="cStableLabel">Fee per fill, stable pair (bp)</span> <input type="number" id="cStable" value="60" step="0.5" min="0" max="200"></label>
     <label>Your latency (ms) <input type="number" id="cLat" value="150" step="10" min="0" max="60000"></label>
     <label>Window (h) <input type="number" id="cHours" value="24" step="1" min="1" max="48"></label>
     <button class="primary">Run</button>
     <span id="cStatus" class="hint"></span>
   </form>
-  <p class="hint">1 bp = 0.01%. A loop needs its orders filled immediately, which means paying Coinbase's taker rate. By 30-day volume: under $10k traded, 60 bp; $10k+, 40; $50k+, 25; $100k+, 20; $1M+, 18; $15M+, 16; $75M+, 10; $250M+, 6; $400M+, 4. Resting an order is cheaper (40 bp at the bottom tier, 0 at the top) but a resting order waits to be filled, and the mismatch is gone by then. Coinbase's "stable pairs" cost 0.1–0.45 bp to take, but USDT/USD — the one that appears here — was reportedly dropped from that list in 2025, so the stable-pair box starts at the ordinary rate; set it to 0.5 if your account still gets the stable rate on USDT/USD. A loop through USDT pays two ordinary fees and one stable fee; a loop through BTC or ETH pays three ordinary fees. Latency is snapped to the nearest of 100, 250, 500 and 1000 ms, which is what the recorder keeps.</p>
+  <p class="hint" id="cFeeHint"></p>
 
   <div class="card">
     <p class="verdict" id="cVerdict"></p>
@@ -65,7 +66,7 @@
 
   <div class="card">
     <h2>Every loop, best first</h2>
-    <p class="hint">"Now" is the loop's gross mismatch at the latest book update. "Median" and "90th" are over samples taken every 20 seconds; "Best" is the largest mismatch seen at any book update, with the dollars the thinnest of the three books allowed at that moment. "Positive" is the share of recorded time the loop was above zero before fees, and an episode is one unbroken stretch of that. "After latency" is the share of episodes still positive when your first order could have arrived, using the quote that was standing at that moment. "Beat fees" counts episodes where what was left after your latency exceeded the loop's three fees, and "$ / day" is what taking every one of those, on the size available at the peak, would have paid. Click a row to see that loop over time. A big number on a coin with tiny size is a quote on a market nobody trades, not money.</p>
+    <p class="hint">"Now" is the loop's gross mismatch at the latest price update. "Median" and "90th" are over samples taken every 20 seconds; "Best" is the largest mismatch seen at any price update, with the dollars the thinnest of the three markets allowed at that moment. "Positive" is the share of recorded time the loop was above zero before fees, and an episode is one unbroken stretch of that. "After latency" is the share of episodes still positive when your first order could have arrived, using the quote that was standing at that moment. "Beat fees" counts episodes where what was left after your latency exceeded the loop's three fees, and "$ / day" is what taking every one of those, on the size available at the peak, would have paid. Click a row to see that loop over time. A big number on a coin with tiny size is a quote on a market nobody trades, not money.</p>
     <div style="overflow-x:auto"><table id="cTable"></table></div>
   </div>
 
@@ -329,17 +330,31 @@ function renderTriangle(d) {
     rows.map(p => `<tr><td>${cap(p.venue)}</td><td>${p.route}</td><td class="${signCls(p.level_bp)}">${bp(p.level_bp)}</td><td>${p.episodes.toLocaleString()}</td><td>${pct(p.share_time, 1)}</td><td>${ms(p.median_ms)}</td><td>${ms(p.p90_ms)}</td><td>${ms(p.max_ms)}</td><td>${pct(p.share_open_after_latency, 0)}</td><td class="${signCls(p.capture_bp_per_day)}">${bp(p.capture_bp_per_day, 1)}</td><td>${p.median_size_usd == null ? "–" : money(p.median_size_usd)}</td><td>${p.median_profit_usd == null ? "–" : "$" + p.median_profit_usd.toFixed(2)}</td></tr>`).join("")
     : "";
 }
-// -------- Coinbase triangles --------
-let cReq = 0, cChart, cPicked = null, cTimer;
-const cParams = () => { const g = id => document.getElementById(id).value; return { coin_fee: g("cFee") || 0, stable_fee: g("cStable") || 0, latency_ms: g("cLat") || 0, hours: g("cHours") || 24 }; };
+// -------- triangles on one exchange --------
+// Per-venue starting values for the fee boxes (bp per immediate fill at the bottom volume tier) and what the second
+// box is called; the long explanation under the form comes from the API with each run.
+const C_VENUES = {
+  coinbase: { fees: [60, 60], label: "Fee per fill, stable pair (bp)" },
+  binanceus: { fees: [2, 1], label: "Fee per fill, Tier 0 pair (bp)" },
+};
+let cReq = 0, cChart, cPicked = null, cTimer, cShown = null;  // cShown: the venue the table currently on screen came from
+const cParams = () => { const g = id => document.getElementById(id).value; return { venue: g("cVenue"), coin_fee: g("cFee") || 0, stable_fee: g("cStable") || 0, latency_ms: g("cLat") || 0, hours: g("cHours") || 24 }; };
+function cVenueChanged() {
+  const v = C_VENUES[document.getElementById("cVenue").value];
+  document.getElementById("cFee").value = v.fees[0]; document.getElementById("cStable").value = v.fees[1];
+  document.getElementById("cStableLabel").textContent = v.label;
+  document.getElementById("cFeeHint").textContent = "";  // the old venue's explanation would mislead; Run brings the new one
+}
 async function runCb(e) {
   e && e.preventDefault();
   const status = document.getElementById("cStatus"), mine = ++cReq;
   status.textContent = "loading…"; status.className = "hint";
-  const r = await fetch("/api/coinbase/triangles?" + new URLSearchParams(cParams()));
+  const r = await fetch("/api/triangles?" + new URLSearchParams(cParams()));
   if (mine !== cReq) return;
   if (!r.ok) { status.textContent = (await r.json()).detail; status.className = "err"; return; }
-  renderCb(await r.json()); status.textContent = "";
+  const d = await r.json();
+  if (d.venue !== cShown) { cPicked = null; cShown = d.venue; }  // a row picked on the other venue means nothing here
+  renderCb(d); status.textContent = "";
   if (cPicked) runCbDetail(cPicked);
   clearTimeout(cTimer); cTimer = setTimeout(runCb, 60000);  // the "now" column and the tallies move; keep them fresh
 }
@@ -348,15 +363,16 @@ function renderCb(d) {
   const everPos = rows.filter(r => r.episodes > 0), beat = rows.reduce((a, r) => a + r.beyond_cost, 0), perDay = rows.reduce((a, r) => a + r.usd_per_day, 0);
   const best = rows.filter(r => r.best_bp != null).sort((a, b) => b.best_bp - a.best_bp)[0];
   const top = rows[0], feed = d.feed;
+  document.getElementById("cFeeHint").textContent = d.fee_hint;
   document.getElementById("cVerdict").innerHTML = !d.alive_h ?
-    `Nothing recorded yet — the feed ${feed?.connected ? "connected " + Math.round(Date.now() / 1000 - feed.connected) + " s ago; the first samples land in a moment" : "is still connecting"}.` :
-    `${d.triangles} triangles, ${rows.length} loops, ${d.alive_h.toFixed(1)} hours of Coinbase's order books recorded in the last ${p.hours} h. ` +
+    `Nothing recorded yet for ${d.venue_name} — the feed ${feed?.connected ? "connected " + Math.round(Date.now() / 1000 - feed.connected) + " s ago; the first samples land in a moment" : "is still connecting"}.` :
+    `${d.venue_name}: ${d.triangles} triangles, ${rows.length} loops, ${d.alive_h.toFixed(1)} hours of its prices recorded in the last ${p.hours} h. ` +
     `<b>${everPos.length}</b> of ${rows.length} loops were positive before fees at some point; the best-behaved is <b>${top.route}</b> with a median of ${bp(top.median_bp, 2)}, positive ${pct(top.share_time, 0)} of the time, on about ${money(top.median_size_usd)}. ` +
     (best ? `The largest single mismatch was <b>${best.route}</b> at ${bp(best.best_bp, 2)} on ${money(best.best_size_usd)}. ` : "") +
-    `At the fees in the boxes above (${p.coin_fee} bp on an ordinary pair, ${p.stable_fee} on a stable pair, so ${2 * p.coin_fee + +p.stable_fee} bp for a loop through USDT and ${3 * p.coin_fee} through BTC or ETH), ` +
+    `At the fees in the boxes above (${p.coin_fee} bp per fill on an ordinary pair, ${p.stable_fee} on a ${d.reduced_label}; each loop's three fills add up to its "Cost" column), ` +
     (beat ? `<b>${beat.toLocaleString()}</b> episodes still beat the cost after ${lat} ms of latency, worth about <b>${money(perDay)} a day</b> on the size that was there.` : `<b>no</b> episode beat the cost after ${lat} ms of latency.`);
   document.getElementById("cTiles").innerHTML = [
-    ["Loops watched", rows.length], ["Book updates", feed ? feed.updates.toLocaleString() : "–"], ["Recorded", d.alive_h ? d.alive_h.toFixed(1) + " h" : "–"],
+    ["Loops watched", rows.length], ["Price updates", feed ? feed.updates.toLocaleString() : "–"], ["Recorded", d.alive_h ? d.alive_h.toFixed(1) + " h" : "–"],
     ["Loops ever positive", everPos.length], ["Episodes", rows.reduce((a, r) => a + r.episodes, 0).toLocaleString()],
     ["Beat fees after " + lat + " ms", beat.toLocaleString()], ["$ per day", money(perDay)],
   ].map(([k, v]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
@@ -371,12 +387,13 @@ function renderCb(d) {
 }
 async function runCbDetail(k) {
   const [coin, via, dir] = k.split("|"), p = cParams();
-  const r = await fetch("/api/coinbase/triangles/detail?" + new URLSearchParams({ coin, via, dir, hours: p.hours }));
+  const r = await fetch("/api/triangles/detail?" + new URLSearchParams({ venue: p.venue, coin, via, dir, hours: p.hours, coin_fee: p.coin_fee, stable_fee: p.stable_fee }));
   if (!r.ok || cPicked !== k) return;
   const d = await r.json(), lat = [100, 250, 500, 1000].reduce((a, b) => Math.abs(b - p.latency_ms) < Math.abs(a - p.latency_ms) ? b : a);
-  const cost = d.legs.reduce((a, l) => a + (["USDT-USD", "USDC-USD", "USDT-USDC", "DAI-USD", "PYUSD-USD"].includes(l) ? +p.stable_fee : +p.coin_fee), 0);
+  if (d.venue !== cShown) return;  // the venue changed while this was in flight
+  const cost = d.cost_bp;  // the server knows which of the three markets get which fee class
   document.getElementById("cDetailTitle").textContent = d.route;
-  document.getElementById("cDetailHint").textContent = `Books: ${d.legs.join(", ")}. Gross mismatch sampled every 20 s (one point per sample; the episode list below has millisecond timing). The dashed line is your three fees, ${cost} bp.`;
+  document.getElementById("cDetailHint").textContent = `Markets: ${d.legs.join(", ")}. Gross mismatch sampled every 20 s (one point per sample; the episode list below has millisecond timing). The dashed line is your three fees, ${cost} bp.`;
   const t = d.series.t.map(x => new Date(x * 1000));
   cChart?.destroy();
   cChart = new Chart(document.getElementById("cChart"), {
@@ -392,11 +409,12 @@ async function runCbDetail(k) {
                 y: { ticks: { callback: v => v + " bp", maxTicksLimit: 7 }, grid: { color: css("--grid") } } } }
   });
   document.getElementById("cEpisodes").innerHTML = d.episodes.length ?
-    `<tr><th>Opened</th><th>Lasted</th><th>Opened at</th><th>Peak</th><th>Size at peak</th><th>After ${lat} ms</th><th>Net after fees</th><th>Book updates</th></tr>` +
+    `<tr><th>Opened</th><th>Lasted</th><th>Opened at</th><th>Peak</th><th>Size at peak</th><th>After ${lat} ms</th><th>Net after fees</th><th>Price updates</th></tr>` +
     d.episodes.map(e => { const net = (e["bp_at_" + lat] - cost) / 1e4 * e.max_size_usd; return `<tr><td>${new Date(e.start).toLocaleString()}</td><td>${ms(e.ms)}${e.broken ? " (feed dropped)" : ""}</td><td>${bp(e.open_bp, 2)}</td><td class="pos">${bp(e.max_bp, 2)}</td><td>${money(e.max_size_usd)}</td><td class="${signCls(e["bp_at_" + lat] || -1)}">${e["bp_at_" + lat] > 0 ? bp(e["bp_at_" + lat], 2) : "gone"}</td><td class="${signCls(net)}">${e["bp_at_" + lat] > 0 ? "$" + net.toFixed(2) : "–"}</td><td>${e.updates}</td></tr>`; }).join("")
     : "<tr><td>No positive episode in the window.</td></tr>";
 }
 document.getElementById("fCb").addEventListener("submit", runCb);
+document.getElementById("cVenue").addEventListener("change", cVenueChanged);
 runCb();
 
 // -------- the rest loads when opened --------

@@ -1,13 +1,13 @@
 # crypto-market
 
-Do Coinbase's own three prices for a coin ever disagree with each other,
+Do an exchange's own three prices for a coin ever disagree with each other,
 for long enough to catch? And is the same coin ever cheaper on one
 exchange than another?
 
     uv sync
     uv run crypto-market        # http://127.0.0.1:8870
 
-## Coinbase triangles (the main page)
+## Triangles on one exchange (the main page)
 
 Every coin Coinbase lists both in dollars and in a bridge currency (BTC,
 ETH or USDT) that is itself listed in dollars is a triangle -- about fifty
@@ -27,6 +27,22 @@ it opened, which is what an order sent on seeing it would actually get.
 The page ranks every loop, charts one, and lists its episodes; fees are
 per fill with a separate rate for Coinbase's stable pairs, so a loop
 through USDT costs two ordinary fees and one stable fee.
+
+The same watcher runs against Binance.US, picked with the Venue box on
+the page. Its triangles come from `exchangeInfo` (about sixty: every
+coin listed in dollars and in BTC, USDT or USDC that is itself listed in
+dollars; nothing there is quoted in ETH), and its prices from one
+combined `bookTicker` stream carrying all ~115 markets, which sends the
+best bid and ask and the size at each whenever a market's top of book
+moves -- no full order book to keep. That stream is silent about a
+market until it changes, so every market is seeded from the REST
+`ticker/bookTicker` snapshot on connect. Files are `butri_samples.csv`
+and `butri_episodes.csv`, same columns as the Coinbase ones. Fees are
+per fill as before; Binance.US's schedule (read from binance.us/fees on
+2026-09-05) is 0 bp for a resting order and 2 bp for an immediate fill
+on every pair, BTC and stablecoin pairs included, with one "Tier 0" pair
+(BNB/USD) at 1 bp, so a loop costs 6 bp -- a far lower bar than
+Coinbase's, and the reason it is worth watching.
 
 ## Across exchanges (under "Everything else")
 
