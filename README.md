@@ -22,6 +22,18 @@ storage (likely accumulation) -- it only sees that unusually large
 transfers happened. Comes with the same in/out-of-sample split as the
 other tabs; the effect is small and doesn't reliably survive it.
 
+A cross-exchange tab asks whether BTC is ever cheap on one venue and dear
+on another for long enough to catch. Thirty days of 1-minute closes from
+Coinbase, Bitstamp and Bitfinex (all public) feed a "see the gap this
+minute, trade it the next, unwind when it closes" rule that pays a fee on
+all four fills; a fee sweep shows what fee it would take to break even.
+For the question minute bars can't answer -- how many milliseconds a gap
+lasts -- the server records best bid/ask from each venue's public
+WebSocket feed while it runs (`data/ticks_btcusd.csv`, rolling 48 h) and
+measures executable episodes against a latency you supply. Finding so far:
+the Coinbase/Bitstamp gap is real but about 1 bp, it only pays with zero
+fees, and every retail fee tier is 20-60x larger than that.
+
 Daily bars come from Yahoo Finance (no key) and are cached under `data/` for
 six hours. Three rules are marked to market every bar:
 
