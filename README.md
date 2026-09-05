@@ -108,6 +108,31 @@ closes, and live from the recorded bids and asks, which is the honest one
 -- the minute-close version reports "gaps" on thin BTC/USDT markets that
 are just stale prints.
 
+## Resting orders on Binance.US
+
+Binance.US charges nothing for an order that rests on the book and is
+filled by somebody else's trade, so the loops above could in principle be
+run at zero fee -- if the orders fill. A resting order only fills when
+someone trades at your price, and the only honest test of that is to
+replay the trades that actually happened. `butrades.py` pulls a month of
+every aggregated trade on the six markets (`trades_binanceus_*.csv`,
+resumable) and `resting.py` replays them through twenty strategies under
+two fill rules that bracket the truth: "through", a trade printed beyond
+your price so your level was eaten whatever your place in the queue, and
+"touch", a trade at your price fills you as if you were first in line.
+The best bid and ask at each moment are estimated from the trades
+themselves (a seller hitting a bid says where the bid was); when that
+estimate turns out stale and an order would have crossed the book, the
+fill is charged the 2 bp immediate rate. The strategies: quote both sides
+of a stablecoin pair one tick better than, at, or one tick behind the best
+price; quote both sides of BTC/USD or ETH/USD 2-25 bp from the mid, held
+until the other side fills, or closed at once, or closed after a 60 s or
+600 s stop; and rest on BTC/USDT at the price BTC/USD and USDT/USD imply,
+finishing the triangle with two immediate fills. Orders are $100, the
+position may drift $500 either way, orders take 200 ms to arrive.
+`uv run python -m crypto_market.resting` writes `resting_results.csv` and
+the profit curves; the page shows them under "Resting orders".
+
 ## Findings so far
 
 Across exchanges. BTC: the Coinbase/Bitstamp gap is real but small, about
@@ -130,3 +155,16 @@ are negative, some by 50-100 bp on coins nobody trades. Coinbase's
 taker rate is 60 bp per fill at the bottom tier and 4 bp at the top
 ($400M a month), so a loop costs 12-180 bp; nothing seen so far comes
 close to even the top tier.
+
+Resting orders. Over 30 days of Binance.US trades (August 6 to September
+5, 2026), every BTC and ETH strategy lost money, $30 to $1,400 a month on
+$2,000: a resting order on a moving coin fills only when the price is
+moving through it, so each fill is on the wrong side of the move by about
+4 bp, and closing at once or on a timer just adds the 2 bp fee. The
+stablecoin quotes are the one place the zero fee shows: USDT/USD quoted
+one tick better than the best price made about $6 a month on $2,000
+(about 4% a year) under the pessimistic rule and $14 under the optimistic
+one, with a $2.50 drawdown; USDC/USD and USDC/USDT trade too little to
+matter (a few thousand trades a month) and came out within a dollar of
+zero. The USDT figure would also have been about 6% of that market's
+volume, which the market would notice.

@@ -9,7 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 
-from . import cbtri, crossex
+from . import cbtri, crossex, resting
 
 
 @asynccontextmanager
@@ -134,6 +134,29 @@ def triangle_detail(venue: str = Query("coinbase", pattern=VENUE), coin: str = Q
     coin_fee = ven.default_fees[0] if coin_fee is None else coin_fee
     stable_fee = ven.default_fees[1] if stable_fee is None else stable_fee
     return cbtri.detail(ven, coin.upper(), via, dir, hours, coin_fee, stable_fee)
+
+
+@app.get("/api/resting")
+def resting_results():
+    """Twenty resting-order strategies replayed against Binance.US's real trades (see resting.py)."""
+    res = resting.results()
+    if res is None:
+        raise HTTPException(404, "no backtest on disk yet: run `uv run python -m crypto_market.resting`")
+    rows = [{k: _clean(v) for k, v in r.items()} for r in res.to_dict("records")]
+    return {"rows": rows, "taker_bp": resting.TAKER_BP, "order_usd": resting.ORDER_USD,
+            "cap_usd": resting.CAP_USD, "latency_ms": resting.LAT_MS,
+            "ran": int(resting.RESULTS_FILE.stat().st_mtime)}
+
+
+@app.get("/api/resting/curve")
+def resting_curve(strategy: str = Query(..., max_length=80)):
+    c = resting.curves(strategy)
+    if c is None or c.empty:
+        raise HTTPException(404, "no such strategy")
+    out = {}
+    for rule, g in c.groupby("rule"):
+        out[rule] = {"t": (g.ts // 1000).tolist(), "pnl": g.pnl_usd.tolist()}
+    return {"strategy": strategy, "rules": out}
 
 
 @app.get("/api/markets")
