@@ -353,7 +353,7 @@ class Watcher:
             now = int(time.time() * 1000)
             if self.connected:
                 for (x, q, d), st in self.state.items():
-                    if now - st["ts"] < 120_000:
+                    if st["ts"] >= self.connected * 1000:  # priced on this connection; a quiet market's quote is still standing
                         self.samples.append((now, x, q, d, round(st["gross"], 3), round(st["size"], 2)))
             self._write(self.venue.samples_path, SAMPLE_COLS, self.samples); self.samples = []
             self._write(self.venue.episodes_path, EPISODE_COLS, self.episodes); self.episodes = []

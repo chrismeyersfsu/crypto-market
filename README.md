@@ -89,7 +89,7 @@ are just stale prints.
 
 Across exchanges. BTC: the Coinbase/Bitstamp gap is real but small, about
 1 bp, and only pays at zero fees -- every retail fee tier is 20-60x larger.
-ETH looks the same (0.9 bp wobble). Binance.US charges nothing on BTC but
+ETH looks the same (0.9 bp wobble). Binance.US charges 2 bp on everything but
 holds about $165 at its best price. Stablecoins: the venues sit at steady
 offsets from each other (Bitfinex about 10 bp above everyone, Binance.US
 about 1 bp above Coinbase and Bitstamp) and wobble around those by
