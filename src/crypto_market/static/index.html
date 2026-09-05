@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Weekday vs Weekend</title>
+<title>Cross-exchange gap</title>
 <style>
   :root {
     color-scheme: light;
@@ -18,9 +18,6 @@
     --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --good: #0ca30c; --bad: #e66767;
   } }
   * { box-sizing: border-box }
-  .tabs { display: flex; gap: 4px; margin-bottom: 14px }
-  .tab { font: inherit; color: var(--ink-2); background: none; border: none; border-bottom: 2px solid transparent; padding: 8px 4px; cursor: pointer }
-  .tab.active { color: var(--ink); border-bottom-color: var(--s1); font-weight: 600 }
   body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif }
   main { max-width: 1100px; margin: 0 auto; padding: 16px }
   h1 { font-size: 20px; margin: 0 0 4px } .sub { color: var(--ink-2); margin: 0 0 16px }
@@ -39,7 +36,6 @@
   th { color: var(--muted); font-weight: 500; font-size: 12px }
   .pos { color: var(--good) } .neg { color: var(--bad) }
   .verdict { font-size: 15px; margin: 0 0 6px } .verdict b { font-weight: 600 }
-  details summary { cursor: pointer; color: var(--ink-2) } .tables { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px } @media (max-width: 720px) { .tables { grid-template-columns: 1fr } }
   .err { color: var(--bad) }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px }
   .tile { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px } .tile .k { font-size: 12px; color: var(--muted) } .tile .v { font-size: 22px; font-weight: 600 }
@@ -47,256 +43,54 @@
 </head>
 <body>
 <main>
-  <nav class="tabs">
-    <button class="tab active" id="tabBacktest">Weekday backtest</button>
-    <button class="tab" id="tabFunding">Funding arb</button>
-    <button class="tab" id="tabOnchain">Large-transfer signal</button>
-    <button class="tab" id="tabIntraday">Intraday (hourly)</button>
-    <button class="tab" id="tabCrossex">Cross-exchange gap</button>
-  </nav>
+  <section id="viewCrossex">
+  <h1>Is the same coin ever cheaper on one exchange than another — for long enough to catch?</h1>
+  <p class="sub">The one fast, small edge that is actually well-defined: buy BTC where it's cheap, sell it where it's dear, at the same moment. Two datasets, two questions. Thirty days of 1-minute bars from three venues (public) say whether a gap <em>exists</em> and whether a "see it this minute, trade it the next" rule makes money after fees. Live best-bid/best-ask ticks, recorded by this server from each venue's public feed since it last started, say how many <em>milliseconds</em> a gap lasts — the number that decides whether a home connection could ever reach it.</p>
 
-  <section id="viewBacktest">
-  <h1>Weekday vs weekend holding</h1>
-  <p class="sub">Does a weekly holding rule beat just holding? Fills at the open/close of the named days, $0 commission, expense ratio accrued per calendar day held. "Core + satellite" runs most of the money as buy &amp; hold and a slice in the custom rule, never rebalanced.</p>
-
-  <form id="f">
-    <label>Ticker <select id="ticker"></select></label>
-    <label>Custom <input id="custom" placeholder="e.g. ETHE" size="8"></label>
-    <label>Start <input type="date" id="start"></label>
-    <label>End <input type="date" id="end"></label>
-    <label>Expense ratio %/yr <input type="number" id="er" value="0.25" step="0.05" min="0"></label>
-    <label>Slippage %/side <input type="number" id="slip" value="0" step="0.01" min="0"></label>
-    <label>Custom rule <select id="rule"><option value="days">weekday → weekday</option><option value="breakout">new N-day high, hold H days</option></select></label>
-    <label class="days">buy at close of <select id="entry"><option value="0">Mon</option><option value="1">Tue</option><option value="2">Wed</option><option value="3" selected>Thu</option><option value="4">Fri</option></select></label>
-    <label class="days">sell at close of <select id="exit"><option value="0" selected>Mon</option><option value="1">Tue</option><option value="2">Wed</option><option value="3">Thu</option><option value="4">Fri</option></select></label>
-    <label class="brk" hidden>N-day high <input type="number" id="bn" value="20" min="2" max="250"></label>
-    <label class="brk" hidden>hold H trading days <input type="number" id="bh" value="5" min="1" max="60"></label>
-    <label>Out-of-sample from <input type="date" id="split"></label>
-    <label>Trend filter: long only above <select id="sma"><option value="0">off</option><option value="20">20-day avg</option><option value="50">50-day avg</option><option value="100">100-day avg</option><option value="200">200-day avg</option></select></label>
-    <label>Satellite % in custom rule <input type="number" id="sat" value="25" min="0" max="100" step="5"></label>
-    <label>Scale <select id="scale"><option value="linear">linear</option><option value="logarithmic">log</option></select></label>
+  <form id="fCrossex">
+    <label>Venue A <select id="xA"><option value="coinbase">Coinbase</option><option value="bitstamp">Bitstamp</option><option value="bitfinex">Bitfinex</option></select></label>
+    <label>Venue B <select id="xB"><option value="coinbase">Coinbase</option><option value="bitstamp" selected>Bitstamp</option><option value="bitfinex">Bitfinex</option></select></label>
+    <label>Fee per fill (bp) <input type="number" id="xFee" value="1" step="0.5" min="0" max="100"></label>
+    <label>Your latency (ms) <input type="number" id="xLat" value="150" step="10" min="0" max="60000"></label>
+    <label>Live window (h) <input type="number" id="xHours" value="24" step="1" min="1" max="48"></label>
     <button class="primary">Run</button>
-    <span id="status" class="hint"></span>
+    <span id="xStatus" class="hint"></span>
   </form>
+  <p class="hint">1 bp = 0.01%. Retail fee tiers for a market order: Coinbase ≈ 60 bp, Bitstamp ≈ 40, Kraken ≈ 40, Bitfinex ≈ 20. Every round trip here pays the fee four times (buy and sell on both venues, then unwind both).</p>
 
-  <div class="card" id="verdictCard" hidden>
-    <p class="verdict" id="verdict"></p>
-    <div class="tiles" id="tiles"></div>
+  <div class="card">
+    <p class="verdict" id="xVerdict"></p>
+    <div class="tiles" id="xTiles"></div>
   </div>
 
   <div class="card">
-    <h2>Growth of $10,000</h2>
-    <p class="hint" id="meta"></p>
-    <p class="hint" id="filterNote"></p>
+    <h2>Price gap, A over B, last 30 days (1-minute closes)</h2>
+    <p class="hint">Basis points. The steady line is the trailing one-day median: a venue's persistent premium, which you can collect once but not repeatedly. Only the wobble around it is tradeable more than once.</p>
     <div class="legend">
-      <span style="--c:var(--s1)">Buy &amp; hold</span>
-      <span style="--c:var(--s2)">Weekday only (Mon open → Fri close)</span>
-      <span style="--c:var(--s3)">Weekend only (Fri close → Mon open)</span>
-      <span style="--c:var(--s4)" id="customLegend">Custom</span>
-      <span style="--c:var(--s5)" id="blendLegend">Core + satellite</span>
+      <span style="--c:var(--s1)">Gap</span>
+      <span style="--c:var(--s2)">Steady level</span>
     </div>
-    <div class="chart"><canvas id="eq"></canvas></div>
+    <div class="chart"><canvas id="xGap"></canvas></div>
   </div>
 
   <div class="card">
-    <h2>Strategy comparison</h2>
-    <p class="hint">CAGR and volatility annualised on calendar time. t-stat: mean leg return vs zero (|t| ≳ 2 is roughly the 5% bar).</p>
-    <table id="stats"></table>
-  </div>
-
-  <div class="card" id="sampleCard" hidden>
-    <h2>In-sample vs out-of-sample</h2>
-    <p class="hint" id="sampleHint">A rule found on the first period should keep working on the second. Set the split to the day you start paper-trading and revisit.</p>
-    <table id="sample"></table>
+    <h2>What fee would this need to work?</h2>
+    <p class="hint">Total 30-day profit of the minute-level rule on this pair, in basis points of capital, at each fee per fill. Hover for trade counts.</p>
+    <div class="chart short"><canvas id="xSweep"></canvas></div>
   </div>
 
   <div class="card">
-    <h2>Average close-to-close return by weekday</h2>
-    <p class="hint">Spot series include Sat/Sun; ETFs only have trading days. Bars show the mean; hover for median, win rate and sample size.</p>
-    <div class="chart short"><canvas id="dow"></canvas></div>
+    <h2>Live ticks: how long does an executable gap last?</h2>
+    <p class="hint" id="xLiveHint"></p>
+    <p class="hint">A moment is "executable" when selling on one venue and buying on the other beats both fees, right now. An episode is an unbroken run of such moments. "Open after latency" is the share of episodes still there when your order could arrive. Rows marked <b>steady</b> are a venue's persistent premium: executable almost continuously, but only once — after that round you hold the wrong asset on each side.</p>
+    <div style="overflow-x:auto"><table id="xLive"></table></div>
   </div>
 
   <div class="card">
-    <details><summary>Individual legs (table view)</summary>
-      <div class="tables">
-        <div><h2>Weekday legs</h2><table id="tWeekday"></table></div>
-        <div><h2>Weekend legs</h2><table id="tWeekend"></table></div>
-        <div><h2>Custom legs</h2><table id="tCustom"></table></div>
-      </div>
-    </details>
+    <h2>Episode durations, selected pair (both directions)</h2>
+    <p class="hint">How long each executable gap between Venue A and Venue B stayed open. Anything left of your latency was gone before you could act.</p>
+    <div class="chart short"><canvas id="xDur"></canvas></div>
   </div>
-  </section>
-
-  <section id="viewFunding" hidden>
-    <h1>BTC funding-rate arbitrage</h1>
-    <p class="sub">Own 1 BTC, short an equal-size BTC perpetual future: price exposure cancels, and every hour you collect (or pay) the funding rate. Data: Deribit BTC-PERPETUAL, hourly, since Apr 2019 — the only free source with this much history.</p>
-
-    <form id="fFunding">
-      <label>Start <input type="date" id="fStart" value="2019-05-01"></label>
-      <label>End <input type="date" id="fEnd"></label>
-      <label>Capital tied up per $1 hedged <input type="number" id="fCap" value="2" step="0.5" min="1" max="5"></label>
-      <label>Scale <select id="fScale"><option value="logarithmic">log</option><option value="linear">linear</option></select></label>
-      <button class="primary">Run</button>
-      <span id="fStatus" class="hint"></span>
-    </form>
-
-    <div class="card">
-      <p class="verdict" id="fVerdict"></p>
-      <div class="tiles" id="fTiles"></div>
-    </div>
-
-    <div class="card">
-      <h2>Growth of $10,000</h2>
-      <p class="hint">Spot is shown for scale, not as something the carry trade is meant to beat — it's a hedged, low-volatility return, not a directional one.</p>
-      <div class="legend">
-        <span style="--c:var(--s1)">Hold BTC spot</span>
-        <span style="--c:var(--s3)">Carry only (funding collected, no capital charge)</span>
-        <span style="--c:var(--s4)">Carry, capital-adjusted</span>
-      </div>
-      <div class="chart"><canvas id="fEq"></canvas></div>
-    </div>
-
-    <div class="card">
-      <h2>Annualized funding rate over time</h2>
-      <p class="hint">Rate × 365, day by day. Above zero: shorts (this trade) get paid. Below zero: shorts pay — the trade loses money that day regardless of price.</p>
-      <div class="chart short"><canvas id="fRate"></canvas></div>
-    </div>
-
-    <div class="card">
-      <h2>By year</h2>
-      <table id="fYear"></table>
-    </div>
-  </section>
-
-  <section id="viewOnchain" hidden>
-    <h1>Does a burst of large transfers predict price?</h1>
-    <p class="sub">Signal: average on-chain transaction size (est. transfer volume ÷ transaction count, from blockchain.info) vs. its trailing 90-day robust average. A day where that ratio spikes is a day with disproportionately large transfers — a free proxy for "whale" activity, without exchange address labels. Rule: buy at the close of a spike day, sell N days later; legs never overlap.</p>
-
-    <form id="fOnchain">
-      <label>Spike threshold (z-score) <input type="number" id="oZ" value="2" step="0.5" min="0.5" max="5"></label>
-      <label>Hold days <input type="number" id="oHold" value="7" min="1" max="30"></label>
-      <label>Out-of-sample from <input type="date" id="oSplit" value="2024-01-01"></label>
-      <label>Scale <select id="oScale"><option value="logarithmic">log</option><option value="linear">linear</option></select></label>
-      <button class="primary">Run</button>
-      <span id="oStatus" class="hint"></span>
-    </form>
-
-    <div class="card">
-      <p class="verdict" id="oVerdict"></p>
-      <div class="tiles" id="oTiles"></div>
-    </div>
-
-    <div class="card">
-      <h2>Growth of $10,000: signal-only exposure vs. holding</h2>
-      <p class="hint">The signal strategy is in the market only on the days after a spike — usually a small fraction of the time.</p>
-      <div class="legend">
-        <span style="--c:var(--s1)">Hold BTC</span>
-        <span style="--c:var(--s3)">In only after a spike</span>
-      </div>
-      <div class="chart"><canvas id="oEq"></canvas></div>
-    </div>
-
-    <div class="card">
-      <h2>In-sample vs out-of-sample</h2>
-      <p class="hint" id="oSampleHint"></p>
-      <table id="oSample"></table>
-    </div>
-
-    <div class="card">
-      <details><summary>Spike legs (table view)</summary>
-        <table id="oTrades"></table>
-      </details>
-    </div>
-  </section>
-
-  <section id="viewIntraday" hidden>
-    <h1>Does "day trading" work at hourly resolution?</h1>
-    <p class="sub">Hourly BTC bars from Bitfinex (public, back to 2013) — the finest free history available, and the actual timescale "day trading" implies. Two tests: is any hour of day (UTC) reliably better or worse, and does the direction of the last N hours predict the next N (momentum), or invert (reversal)? Every position flip costs slippage, since these rules can flip thousands of times.</p>
-
-    <div class="card">
-      <h2>Average return by hour of day (UTC)</h2>
-      <p class="hint">Bitcoin trades 24/7, so "hour of day" here is a UTC clock hour, not a session open/close. Hover for median, win rate and sample size.</p>
-      <div class="chart short"><canvas id="iHour"></canvas></div>
-    </div>
-
-    <form id="fIntraday">
-      <label>Lookback / hold <select id="iLookback"><option value="1">1 hour</option><option value="4">4 hours</option><option value="8">8 hours</option><option value="24" selected>24 hours</option><option value="72">72 hours</option></select></label>
-      <label>Direction <select id="iDir"><option value="momentum">momentum (long after a rise)</option><option value="reversal">reversal (long after a fall)</option></select></label>
-      <label>Slippage %/flip <input type="number" id="iSlip" value="0.05" step="0.01" min="0"></label>
-      <label>Out-of-sample from <input type="date" id="iSplit" value="2021-01-01"></label>
-      <label>Scale <select id="iScale"><option value="logarithmic">log</option><option value="linear">linear</option></select></label>
-      <button class="primary">Run</button>
-      <span id="iStatus" class="hint"></span>
-    </form>
-
-    <div class="card">
-      <p class="verdict" id="iVerdict"></p>
-      <div class="tiles" id="iTiles"></div>
-    </div>
-
-    <div class="card">
-      <h2>Growth of $10,000</h2>
-      <div class="legend">
-        <span style="--c:var(--s1)">Hold BTC</span>
-        <span style="--c:var(--s3)">Signal, after slippage</span>
-      </div>
-      <div class="chart"><canvas id="iEq"></canvas></div>
-    </div>
-
-    <div class="card">
-      <h2>In-sample vs out-of-sample</h2>
-      <p class="hint" id="iSampleHint"></p>
-      <table id="iSample"></table>
-    </div>
-  </section>
-  <section id="viewCrossex" hidden>
-    <h1>Is the same coin ever cheaper on one exchange than another — for long enough to catch?</h1>
-    <p class="sub">The one fast, small edge that is actually well-defined: buy BTC where it's cheap, sell it where it's dear, at the same moment. Two datasets, two questions. Thirty days of 1-minute bars from three venues (public) say whether a gap <em>exists</em> and whether a "see it this minute, trade it the next" rule makes money after fees. Live best-bid/best-ask ticks, recorded by this server from each venue's public feed since it last started, say how many <em>milliseconds</em> a gap lasts — the number that decides whether a home connection could ever reach it.</p>
-
-    <form id="fCrossex">
-      <label>Venue A <select id="xA"><option value="coinbase">Coinbase</option><option value="bitstamp">Bitstamp</option><option value="bitfinex">Bitfinex</option></select></label>
-      <label>Venue B <select id="xB"><option value="coinbase">Coinbase</option><option value="bitstamp" selected>Bitstamp</option><option value="bitfinex">Bitfinex</option></select></label>
-      <label>Fee per fill (bp) <input type="number" id="xFee" value="1" step="0.5" min="0" max="100"></label>
-      <label>Your latency (ms) <input type="number" id="xLat" value="150" step="10" min="0" max="60000"></label>
-      <label>Live window (h) <input type="number" id="xHours" value="24" step="1" min="1" max="48"></label>
-      <button class="primary">Run</button>
-      <span id="xStatus" class="hint"></span>
-    </form>
-    <p class="hint">1 bp = 0.01%. Retail fee tiers for a market order: Coinbase ≈ 60 bp, Bitstamp ≈ 40, Kraken ≈ 40, Bitfinex ≈ 20. Every round trip here pays the fee four times (buy and sell on both venues, then unwind both).</p>
-
-    <div class="card">
-      <p class="verdict" id="xVerdict"></p>
-      <div class="tiles" id="xTiles"></div>
-    </div>
-
-    <div class="card">
-      <h2>Price gap, A over B, last 30 days (1-minute closes)</h2>
-      <p class="hint">Basis points. The steady line is the trailing one-day median: a venue's persistent premium, which you can collect once but not repeatedly. Only the wobble around it is tradeable more than once.</p>
-      <div class="legend">
-        <span style="--c:var(--s1)">Gap</span>
-        <span style="--c:var(--s2)">Steady level</span>
-      </div>
-      <div class="chart"><canvas id="xGap"></canvas></div>
-    </div>
-
-    <div class="card">
-      <h2>What fee would this need to work?</h2>
-      <p class="hint">Total 30-day profit of the minute-level rule on this pair, in basis points of capital, at each fee per fill. Hover for trade counts.</p>
-      <div class="chart short"><canvas id="xSweep"></canvas></div>
-    </div>
-
-    <div class="card">
-      <h2>Live ticks: how long does an executable gap last?</h2>
-      <p class="hint" id="xLiveHint"></p>
-      <p class="hint">A moment is "executable" when selling on one venue and buying on the other beats both fees, right now. An episode is an unbroken run of such moments. "Open after latency" is the share of episodes still there when your order could arrive. Rows marked <b>steady</b> are a venue's persistent premium: executable almost continuously, but only once — after that round you hold the wrong asset on each side.</p>
-      <div style="overflow-x:auto"><table id="xLive"></table></div>
-    </div>
-
-    <div class="card">
-      <h2>Episode durations, selected pair (both directions)</h2>
-      <p class="hint">How long each executable gap between Venue A and Venue B stayed open. Anything left of your latency was gone before you could act.</p>
-      <div class="chart short"><canvas id="xDur"></canvas></div>
-    </div>
   </section>
 </main>
 
@@ -307,9 +101,6 @@ const pct = (v, d = 1) => v == null ? "–" : (v * 100).toFixed(d) + "%";
 const money = v => v == null ? "–" : "$" + Math.round(v).toLocaleString();
 const num = (v, d = 2) => v == null ? "–" : v.toFixed(d);
 const signCls = v => v == null ? "" : v >= 0 ? "pos" : "neg";
-const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const NAMES = { buy_hold: "Buy & hold", weekday: "Weekday only", weekend: "Weekend only", custom: "Custom", blend: "Core + satellite" };
-let eqChart, dowChart;
 
 Chart.defaults.color = css("--muted");
 Chart.defaults.borderColor = css("--grid");
@@ -320,350 +111,8 @@ Chart.defaults.plugins.tooltip.bodyColor = css("--ink-2");
 Chart.defaults.plugins.tooltip.borderColor = css("--border");
 Chart.defaults.plugins.tooltip.borderWidth = 1;
 
-async function loadTickers() {
-  const sel = document.getElementById("ticker");
-  for (const t of await (await fetch("/api/tickers")).json()) {
-    const o = document.createElement("option"); o.value = t.symbol; o.textContent = `${t.symbol} — ${t.name}`; sel.append(o);
-  }
-}
-
-function params() {
-  const g = id => document.getElementById(id).value;
-  const p = new URLSearchParams({ ticker: g("custom").trim() || g("ticker"), expense_ratio: g("er") || 0, slippage: g("slip") || 0, entry_dow: g("entry"), exit_dow: g("exit"), sma: g("sma"), satellite: g("sat") || 0, rule: g("rule"), breakout_n: g("bn") || 20, hold_bars: g("bh") || 5 });
-  if (g("start")) p.set("start", g("start")); if (g("end")) p.set("end", g("end")); if (g("split")) p.set("split", g("split"));
-  return p;
-}
-
-async function run(e) {
-  e && e.preventDefault();
-  const status = document.getElementById("status");
-  status.textContent = "loading…"; status.className = "hint";
-  const r = await fetch("/api/backtest?" + params());
-  if (!r.ok) { status.textContent = (await r.json()).detail; status.className = "err"; return; }
-  const d = await r.json(); status.textContent = "";
-  history.replaceState(null, "", "?" + params());
-  render(d);
-}
-
-function render(d) {
-  const m = d.meta;
-  document.getElementById("meta").textContent = `${m.name || m.symbol} · ${m.first} → ${m.last} · ${m.bars} bars`;
-  const s = d.stats, scale = document.getElementById("scale").value;
-  const isSpot = /-USD$/.test(m.symbol);
-  const gv = id => document.getElementById(id).value;
-  const customName = gv("rule") === "breakout" ? `New ${gv("bn")}-day high → hold ${gv("bh")}d` : `${DOW[+gv("entry")]} close → ${DOW[+gv("exit")]} close`;
-  NAMES.custom = customName; document.getElementById("customLegend").textContent = customName;
-  const sat = +document.getElementById("sat").value, sma = +document.getElementById("sma").value;
-  const blendName = `${100 - sat}% held + ${sat}% rule`;
-  NAMES.blend = blendName; document.getElementById("blendLegend").textContent = blendName;
-  document.getElementById("filterNote").textContent = sma ? `Trend filter on: long only while the close is above its ${sma}-day average (buy & hold becomes in/out at the next open; weekly rules skip legs that would start below it).` : "";
-
-  // Verdict + tiles
-  const wd = s.weekday, we = s.weekend, bh = s.buy_hold, cu = s.custom, bl = s.blend;
-  const vc = document.getElementById("verdictCard"); vc.hidden = false;
-  const t = d.weekday_vs_weekend_t;
-  const beat = wd.total_return > bh.total_return;
-  document.getElementById("verdict").innerHTML =
-    `Weekday-only turned $10k into <b>${money(wd.final)}</b> vs <b>${money(bh.final)}</b> for buy &amp; hold` +
-    ` (${beat ? "ahead" : "behind"} by ${pct(Math.abs(wd.total_return - bh.total_return), 0)} pts). ` +
-    `The weekend legs it skipped averaged <b class="${signCls(we.avg_trade)}">${pct(we.avg_trade, 3)}</b> each` +
-    (t == null ? "." : `; weekday vs weekend leg difference t = <b>${num(t)}</b> ${Math.abs(t) >= 2 ? "(statistically meaningful)" : "(within noise)"}.`) +
-    (isSpot || !(+document.getElementById("er").value) ? "" : " ETF prices already embed their expense ratio, so the drag here is on top of it — set it to 0 for a pure comparison.");
-  document.getElementById("tiles").innerHTML = [
-    ["Buy & hold CAGR", pct(bh.cagr), bh.cagr], ["Weekday CAGR", pct(wd.cagr), wd.cagr], ["Weekend CAGR", pct(we.cagr), we.cagr],
-    ["Max drawdown (B&H → weekday)", `${pct(bh.max_drawdown, 0)} → ${pct(wd.max_drawdown, 0)}`, null],
-    ["Weekday legs / win rate", `${wd.trades} / ${pct(wd.win_rate, 0)}`, null],
-    [`${customName} CAGR / maxDD`, `${pct(cu.cagr)} / ${pct(cu.max_drawdown, 0)}`, cu.cagr],
-    [`${blendName} CAGR / maxDD`, `${pct(bl.cagr)} / ${pct(bl.max_drawdown, 0)}`, bl.cagr],
-  ].map(([k, v, sg]) => `<div class="tile"><div class="k">${k}</div><div class="v ${signCls(sg)}">${v}</div></div>`).join("");
-
-  // Equity chart
-  const colors = { buy_hold: css("--s1"), weekday: css("--s2"), weekend: css("--s3"), custom: css("--s4"), blend: css("--s5") };
-  const ds = Object.keys(NAMES).map(k => ({ label: NAMES[k], data: d.equity[k], borderColor: colors[k], borderWidth: 2, pointRadius: 0, pointHitRadius: 8, tension: 0 }));
-  eqChart?.destroy();
-  eqChart = new Chart(document.getElementById("eq"), {
-    type: "line", data: { labels: d.dates, datasets: ds },
-    options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${money(c.parsed.y)}` } } },
-      scales: { x: { ticks: { maxTicksLimit: 8, maxRotation: 0 }, grid: { display: false } },
-                y: { type: scale, ticks: { callback: v => money(v), maxTicksLimit: 7 }, grid: { color: css("--grid") } } } }
-  });
-
-  // Stats table
-  const rows = [
-    ["Final value", k => money(s[k].final)], ["Total return", k => pct(s[k].total_return, 0), k => s[k].total_return],
-    ["CAGR", k => pct(s[k].cagr), k => s[k].cagr], ["Max drawdown", k => pct(s[k].max_drawdown, 0), k => s[k].max_drawdown],
-    ["Volatility (ann.)", k => pct(s[k].volatility, 0)], ["Return / vol", k => num(s[k].sharpe)],
-    ["Legs", k => s[k].trades], ["Win rate", k => pct(s[k].win_rate, 0)], ["Avg leg", k => pct(s[k].avg_trade, 3), k => s[k].avg_trade],
-    ["Median leg", k => pct(s[k].median_trade, 3), k => s[k].median_trade], ["t-stat (mean leg vs 0)", k => num(s[k].t_stat)],
-  ];
-  document.getElementById("stats").innerHTML = `<tr><th></th>${Object.values(NAMES).map(n => `<th>${n}</th>`).join("")}</tr>` +
-    rows.map(([lab, f, sg], i) => `<tr><td>${lab}</td>${Object.keys(NAMES).map(k => `<td class="${sg ? signCls(sg(k)) : ""}">${(k === "blend" && i >= 6) || (k === "buy_hold" && i >= 8) ? "–" : f(k)}</td>`).join("")}</tr>`).join("");
-
-  // In-sample / out-of-sample
-  const sc = document.getElementById("sampleCard");
-  if (d.sample) {
-    sc.hidden = false;
-    const split = document.getElementById("split").value;
-    document.getElementById("sampleHint").textContent = `Before ${split} vs from ${split} on. Each half re-based to its own start.`;
-    const cols = [["CAGR", "cagr", v => pct(v)], ["Max DD", "max_drawdown", v => pct(v, 0)], ["Return / vol", "sharpe", v => num(v)], ["Legs", "trades", v => v == null ? "–" : v], ["Avg leg", "avg_trade", v => pct(v, 3)], ["t-stat", "t_stat", v => num(v)]];
-    document.getElementById("sample").innerHTML =
-      `<tr><th></th>${cols.map(c => `<th colspan="2">${c[0]}</th>`).join("")}</tr>` +
-      `<tr><th></th>${cols.map(() => "<th>in</th><th>out</th>").join("")}</tr>` +
-      Object.keys(NAMES).map(k => `<tr><td>${NAMES[k]}</td>${cols.map(([, key, f]) => ["in", "out"].map(h => { const v = ["buy_hold", "blend"].includes(k) && ["trades", "avg_trade", "t_stat"].includes(key) ? null : d.sample[k][h][key]; return `<td class="${["cagr","avg_trade"].includes(key) ? signCls(v) : ""}">${f(v)}</td>`; }).join("")).join("")}</tr>`).join("");
-  } else sc.hidden = true;
-
-  // Day-of-week chart
-  const dow = d.day_of_week;
-  dowChart?.destroy();
-  dowChart = new Chart(document.getElementById("dow"), {
-    type: "bar", data: { labels: dow.map(r => DOW[r.dow]), datasets: [{ data: dow.map(r => r.mean * 100), backgroundColor: css("--s1"), borderRadius: 4, borderSkipped: "start", maxBarThickness: 48 }] },
-    options: { responsive: true, maintainAspectRatio: false, animation: false,
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => { const r = dow[c.dataIndex]; return [` mean ${num(r.mean * 100, 3)}%`, ` median ${num(r.median * 100, 3)}%`, ` win rate ${pct(r.win_rate, 0)}`, ` n = ${r.n}`]; } } } },
-      scales: { x: { grid: { display: false } }, y: { ticks: { callback: v => v.toFixed(2) + "%" }, grid: { color: css("--grid") } } } }
-  });
-
-  // Leg tables
-  for (const [k, id] of [["weekday", "tWeekday"], ["weekend", "tWeekend"], ["custom", "tCustom"]]) {
-    const tr = d.trades[k];
-    document.getElementById(id).innerHTML = "<tr><th>Entry</th><th>Exit</th><th>Days</th><th>Return</th></tr>" +
-      tr.slice().reverse().map(x => `<tr><td>${x.entry}</td><td>${x.exit}</td><td>${x.days}</td><td class="${signCls(x.ret)}">${pct(x.ret, 2)}</td></tr>`).join("");
-  }
-}
-
-// -------- Tabs --------
-let fundingLoaded = false, fEqChart, fRateChart;
-let onchainLoaded = false, oEqChart;
-let intradayLoaded = false, iEqChart, iHourChart;
-let crossexLoaded = false, xGapChart, xSweepChart, xDurChart;
-function showTab(name) {
-  document.getElementById("viewBacktest").hidden = name !== "backtest";
-  document.getElementById("viewFunding").hidden = name !== "funding";
-  document.getElementById("viewOnchain").hidden = name !== "onchain";
-  document.getElementById("tabBacktest").classList.toggle("active", name === "backtest");
-  document.getElementById("tabFunding").classList.toggle("active", name === "funding");
-  document.getElementById("tabOnchain").classList.toggle("active", name === "onchain");
-  document.getElementById("viewIntraday").hidden = name !== "intraday";
-  document.getElementById("tabIntraday").classList.toggle("active", name === "intraday");
-  document.getElementById("viewCrossex").hidden = name !== "crossex";
-  document.getElementById("tabCrossex").classList.toggle("active", name === "crossex");
-  localStorage.setItem("cm-tab", name);
-  if (name === "funding" && !fundingLoaded) { fundingLoaded = true; runFunding(); }
-  if (name === "onchain" && !onchainLoaded) { onchainLoaded = true; runOnchain(); }
-  if (name === "intraday" && !intradayLoaded) { intradayLoaded = true; loadHourChart(); runIntraday(); }
-  if (name === "crossex" && !crossexLoaded) { crossexLoaded = true; runCrossex(); }
-}
-document.getElementById("tabBacktest").addEventListener("click", () => showTab("backtest"));
-document.getElementById("tabFunding").addEventListener("click", () => showTab("funding"));
-document.getElementById("tabOnchain").addEventListener("click", () => showTab("onchain"));
-document.getElementById("tabIntraday").addEventListener("click", () => showTab("intraday"));
-document.getElementById("tabCrossex").addEventListener("click", () => showTab("crossex"));
-
-// -------- Funding arb tab --------
-
-function fParams() {
-  const g = id => document.getElementById(id).value;
-  const p = new URLSearchParams({ capital_multiple: g("fCap") || 2 });
-  if (g("fStart")) p.set("start", g("fStart")); if (g("fEnd")) p.set("end", g("fEnd"));
-  return p;
-}
-
-async function runFunding(e) {
-  e && e.preventDefault();
-  const status = document.getElementById("fStatus");
-  status.textContent = "loading…"; status.className = "hint";
-  const r = await fetch("/api/funding?" + fParams());
-  if (!r.ok) { status.textContent = (await r.json()).detail; status.className = "err"; return; }
-  const d = await r.json(); status.textContent = "";
-  renderFunding(d);
-}
-
-function renderFunding(d) {
-  const s = d.stats, cap = document.getElementById("fCap").value;
-  document.getElementById("fVerdict").innerHTML =
-    `$10,000 fully hedged (long spot, short an equal perpetual) earned <b class="${signCls(s.carry.cagr)}">${pct(s.carry.cagr)}</b>/yr in funding, ` +
-    `zero net price exposure — max drawdown just <b>${pct(s.carry.max_drawdown, 1)}</b> vs <b>${pct(s.spot.max_drawdown, 0)}</b> for holding BTC outright. ` +
-    `Funding was negative (you pay instead of receive) on <b>${pct(d.share_days_negative, 0)}</b> of days. ` +
-    `At ${cap}x capital tied up (spot + short collateral), the return on capital actually used is <b class="${signCls(s.carry_adjusted.cagr)}">${pct(s.carry_adjusted.cagr)}</b>/yr.`;
-  document.getElementById("fTiles").innerHTML = [
-    ["Carry CAGR (on notional)", pct(s.carry.cagr), s.carry.cagr],
-    [`Carry CAGR (${cap}× capital)`, pct(s.carry_adjusted.cagr), s.carry_adjusted.cagr],
-    ["Carry max drawdown", pct(s.carry.max_drawdown, 1), s.carry.max_drawdown],
-    ["Carry return / vol", num(s.carry.sharpe), null],
-    ["Spot CAGR (for reference)", pct(s.spot.cagr), s.spot.cagr],
-    ["Days funding was negative", pct(d.share_days_negative, 0), -d.share_days_negative],
-  ].map(([k, v, sg]) => `<div class="tile"><div class="k">${k}</div><div class="v ${signCls(sg)}">${v}</div></div>`).join("");
-
-  const scale = document.getElementById("fScale").value;
-  fEqChart?.destroy();
-  fEqChart = new Chart(document.getElementById("fEq"), {
-    type: "line",
-    data: { labels: d.dates, datasets: [
-      { label: "Hold BTC spot", data: d.equity.spot, borderColor: css("--s1"), borderWidth: 2, pointRadius: 0, pointHitRadius: 8 },
-      { label: "Carry only", data: d.equity.carry, borderColor: css("--s3"), borderWidth: 2, pointRadius: 0, pointHitRadius: 8 },
-      { label: "Carry, capital-adjusted", data: d.equity.carry_adjusted, borderColor: css("--s4"), borderWidth: 2, pointRadius: 0, pointHitRadius: 8 },
-    ] },
-    options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${money(c.parsed.y)}` } } },
-      scales: { x: { ticks: { maxTicksLimit: 8, maxRotation: 0 }, grid: { display: false } },
-                y: { type: scale, ticks: { callback: v => money(v), maxTicksLimit: 7 }, grid: { color: css("--grid") } } } }
-  });
-
-  fRateChart?.destroy();
-  const colors = d.annualized_rate.map(v => v >= 0 ? css("--s3") : css("--bad"));
-  fRateChart = new Chart(document.getElementById("fRate"), {
-    type: "bar",
-    data: { labels: d.dates, datasets: [{ data: d.annualized_rate.map(v => v * 100), backgroundColor: colors, borderRadius: 2, maxBarThickness: 6 }] },
-    options: { responsive: true, maintainAspectRatio: false, animation: false,
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${num(c.parsed.y, 1)}% annualized` } } },
-      scales: { x: { ticks: { maxTicksLimit: 8, maxRotation: 0 }, grid: { display: false } },
-                y: { ticks: { callback: v => v + "%" }, grid: { color: css("--grid") } } } }
-  });
-
-  document.getElementById("fYear").innerHTML = "<tr><th>Year</th><th>Mean annualized</th><th>Best day (ann.)</th><th>Worst day (ann.)</th><th>Days negative</th></tr>" +
-    d.by_year.map(y => `<tr><td>${y.year}</td><td class="${signCls(y.mean_annualized)}">${pct(y.mean_annualized, 1)}</td><td class="pos">${pct(y.max_annualized, 0)}</td><td class="neg">${pct(y.min_annualized, 0)}</td><td>${y.days_negative} / ${y.days}</td></tr>`).join("");
-}
-
-document.getElementById("fFunding").addEventListener("submit", runFunding);
-document.getElementById("fScale").addEventListener("change", () => fEqChart && (fEqChart.options.scales.y.type = document.getElementById("fScale").value, fEqChart.update()));
-showTab(["funding", "onchain", "intraday", "crossex"].includes(localStorage.getItem("cm-tab")) ? localStorage.getItem("cm-tab") : "backtest");
-
-// -------- Large-transfer signal tab --------
-function oParams() {
-  const g = id => document.getElementById(id).value;
-  const p = new URLSearchParams({ z_thresh: g("oZ") || 2, hold_days: g("oHold") || 7 });
-  if (g("oSplit")) p.set("split", g("oSplit"));
-  return p;
-}
-async function runOnchain(e) {
-  e && e.preventDefault();
-  const status = document.getElementById("oStatus");
-  status.textContent = "loading…"; status.className = "hint";
-  const r = await fetch("/api/onchain?" + oParams());
-  if (!r.ok) { status.textContent = (await r.json()).detail; status.className = "err"; return; }
-  renderOnchain(await r.json()); status.textContent = "";
-}
-function renderOnchain(d) {
-  const s = d.stats, t = d.signal_t_stat, meaningful = Math.abs(t) >= 2;
-  document.getElementById("oVerdict").innerHTML =
-    `${d.n_spikes} spike days found. The ${document.getElementById("oHold").value}-day return after a spike averaged ` +
-    `<b class="${signCls(d.fwd_return_spike_mean - d.fwd_return_base_mean)}">${pct(d.fwd_return_spike_mean, 2)}</b>, vs ` +
-    `<b>${pct(d.fwd_return_base_mean, 2)}</b> on an average day (t = <b>${num(t)}</b>, ${meaningful ? "statistically meaningful" : "within noise"}). ` +
-    `Trading only those windows turned $10k into <b>${money(d.equity_signal[d.equity_signal.length - 1])}</b> (vs <b>${money(d.equity_hold[d.equity_hold.length - 1])}</b> for holding throughout)` +
-    ` — check the split below before trusting the full-history number; it usually looks better in-sample than out.`;
-  document.getElementById("oTiles").innerHTML = [
-    ["Spike days", d.n_spikes], ["Legs taken", s.trades], ["Win rate", pct(s.win_rate, 0)],
-    ["Avg leg", pct(s.avg_trade, 2), s.avg_trade], ["Median leg", pct(s.median_trade, 2), s.median_trade],
-    ["Full-history t-stat", num(t), null],
-  ].map(([k, v, sg]) => `<div class="tile"><div class="k">${k}</div><div class="v ${sg !== undefined ? signCls(sg) : ""}">${v}</div></div>`).join("");
-
-  const scale = document.getElementById("oScale").value;
-  oEqChart?.destroy();
-  oEqChart = new Chart(document.getElementById("oEq"), {
-    type: "line",
-    data: { labels: d.dates, datasets: [
-      { label: "Hold BTC", data: d.equity_hold, borderColor: css("--s1"), borderWidth: 2, pointRadius: 0, pointHitRadius: 8 },
-      { label: "Signal only", data: d.equity_signal, borderColor: css("--s3"), borderWidth: 2, pointRadius: 0, pointHitRadius: 8 },
-    ] },
-    options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${money(c.parsed.y)}` } } },
-      scales: { x: { ticks: { maxTicksLimit: 8, maxRotation: 0 }, grid: { display: false } },
-                y: { type: scale, ticks: { callback: v => money(v), maxTicksLimit: 7 }, grid: { color: css("--grid") } } } }
-  });
-
-  const sp = document.getElementById("oSplit").value;
-  document.getElementById("oSampleHint").textContent = `Before ${sp} vs from ${sp} on — the number that matters is "out", since "in" is what found the rule.`;
-  const cols = [["Spikes", "n_spikes", v => v ?? "–"], ["Spike fwd return", "fwd_return_spike_mean", v => pct(v, 2)], ["Baseline fwd return", "fwd_return_base_mean", v => pct(v, 2)], ["Signal t-stat", "signal_t_stat", v => num(v)], ["CAGR (while active)", "cagr", v => pct(v)], ["Legs", "trades", v => v ?? "–"], ["Win rate", "win_rate", v => pct(v, 0)]];
-  document.getElementById("oSample").innerHTML = d.sample ?
-    `<tr><th></th><th>In-sample</th><th>Out-of-sample</th></tr>` +
-    cols.map(([lab, key, f]) => `<tr><td>${lab}</td><td>${f(d.sample.in[key])}</td><td class="${key === "signal_t_stat" ? signCls(d.sample.out[key]) : ""}">${f(d.sample.out[key])}</td></tr>`).join("")
-    : "";
-
-  document.getElementById("oTrades").innerHTML = "<tr><th>Entry</th><th>Exit</th><th>Days</th><th>Return</th></tr>" +
-    d.trades.slice().reverse().map(x => `<tr><td>${x.entry}</td><td>${x.exit}</td><td>${x.days}</td><td class="${signCls(x.ret)}">${pct(x.ret, 2)}</td></tr>`).join("");
-}
-document.getElementById("fOnchain").addEventListener("submit", runOnchain);
-document.getElementById("oScale").addEventListener("change", () => oEqChart && (oEqChart.options.scales.y.type = document.getElementById("oScale").value, oEqChart.update()));
-
-// -------- Intraday tab --------
-function iParams() {
-  const g = id => document.getElementById(id).value;
-  const p = new URLSearchParams({ lookback: g("iLookback"), direction: g("iDir"), slippage: g("iSlip") || 0 });
-  if (g("iSplit")) p.set("split", g("iSplit"));
-  return p;
-}
-async function runIntraday(e) {
-  e && e.preventDefault();
-  const status = document.getElementById("iStatus");
-  status.textContent = "loading…"; status.className = "hint";
-  const r = await fetch("/api/intraday?" + iParams());
-  if (!r.ok) { status.textContent = (await r.json()).detail; status.className = "err"; return; }
-  renderIntraday(await r.json()); status.textContent = "";
-}
-function renderIntraday(d) {
-  const s = d.stats, lb = document.getElementById("iLookback").value, dir = document.getElementById("iDir").value;
-  const survives = s.cagr > 0 && d.sample?.out?.cagr > 0;
-  document.getElementById("iVerdict").innerHTML =
-    `${lb}h ${dir}, ${d.flips.toLocaleString()} position flips over the full history, ${document.getElementById("iSlip").value}% slippage per flip: ` +
-    `$10k → <b class="${signCls(s.cagr)}">${money(d.equity_signal[d.equity_signal.length - 1])}</b> (CAGR ${pct(s.cagr)}), vs ` +
-    `<b>${money(d.equity_hold[d.equity_hold.length - 1])}</b> for holding. ` +
-    (survives ? "It survives costs and the out-of-sample check — still worth treating with suspicion at this turnover." :
-      "It does <b>not</b> survive — negative after costs, or reverses out-of-sample, or both. That's the typical outcome at this frequency.");
-  document.getElementById("iTiles").innerHTML = [
-    ["CAGR after slippage", pct(s.cagr), s.cagr], ["Max drawdown", pct(s.max_drawdown, 0), s.max_drawdown],
-    ["Return / vol", num(s.sharpe), null], ["Position flips", d.flips.toLocaleString(), null],
-    ["Return with signal", pct(d.signal_mean_with, 3), d.signal_mean_with],
-    ["Return against signal", pct(d.signal_mean_against, 3), d.signal_mean_against],
-  ].map(([k, v, sg]) => `<div class="tile"><div class="k">${k}</div><div class="v ${sg !== undefined && sg !== null ? signCls(sg) : ""}">${v}</div></div>`).join("");
-
-  const scale = document.getElementById("iScale").value;
-  iEqChart?.destroy();
-  iEqChart = new Chart(document.getElementById("iEq"), {
-    type: "line",
-    data: { labels: d.dates, datasets: [
-      { label: "Hold BTC", data: d.equity_hold, borderColor: css("--s1"), borderWidth: 1.5, pointRadius: 0 },
-      { label: "Signal", data: d.equity_signal, borderColor: css("--s3"), borderWidth: 1.5, pointRadius: 0 },
-    ] },
-    options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${money(c.parsed.y)}` } } },
-      scales: { x: { ticks: { maxTicksLimit: 8, maxRotation: 0 }, grid: { display: false } },
-                y: { type: scale, ticks: { callback: v => money(v), maxTicksLimit: 7 }, grid: { color: css("--grid") } } } }
-  });
-
-  const sp = document.getElementById("iSplit").value;
-  document.getElementById("iSampleHint").textContent = `Before ${sp} vs from ${sp} on.`;
-  const cols = [["CAGR", "cagr", v => pct(v)], ["Max DD", "max_drawdown", v => pct(v, 0)], ["Return / vol", "sharpe", v => num(v)], ["Flips", "flips", v => v?.toLocaleString() ?? "–"], ["Signal t-stat", "signal_t_stat", v => num(v)]];
-  document.getElementById("iSample").innerHTML = d.sample ?
-    `<tr><th></th><th>In-sample</th><th>Out-of-sample</th></tr>` +
-    cols.map(([lab, key, f]) => `<tr><td>${lab}</td><td class="${key === "cagr" ? signCls(d.sample.in[key]) : ""}">${f(d.sample.in[key])}</td><td class="${key === "cagr" || key === "signal_t_stat" ? signCls(d.sample.out[key]) : ""}">${f(d.sample.out[key])}</td></tr>`).join("")
-    : "";
-}
-document.getElementById("fIntraday").addEventListener("submit", runIntraday);
-document.getElementById("iScale").addEventListener("change", () => iEqChart && (iEqChart.options.scales.y.type = document.getElementById("iScale").value, iEqChart.update()));
-
-async function loadHourChart() {
-  const r = await fetch("/api/intraday?lookback=24&direction=momentum");
-  const d = await r.json();
-  iHourChart?.destroy();
-  iHourChart = new Chart(document.getElementById("iHour"), {
-    type: "bar",
-    data: { labels: d.hour_of_day.map(r => String(r.hour).padStart(2, "0") + ":00"), datasets: [{ data: d.hour_of_day.map(r => r.mean * 100), backgroundColor: css("--s1"), borderRadius: 3, maxBarThickness: 28 }] },
-    options: { responsive: true, maintainAspectRatio: false, animation: false,
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => { const r = d.hour_of_day[c.dataIndex]; return [` mean ${num(r.mean * 100, 3)}%`, ` median ${num(r.median * 100, 3)}%`, ` win rate ${pct(r.win_rate, 0)}`, ` n = ${r.n.toLocaleString()}`]; } } } },
-      scales: { x: { ticks: { maxTicksLimit: 12 }, grid: { display: false } }, y: { ticks: { callback: v => v.toFixed(2) + "%" }, grid: { color: css("--grid") } } } }
-  });
-}
-
-document.getElementById("f").addEventListener("submit", run);
-function ruleUI() { const b = document.getElementById("rule").value === "breakout"; document.querySelectorAll("label.days").forEach(l => l.hidden = b); document.querySelectorAll("label.brk").forEach(l => l.hidden = !b); }
-document.getElementById("rule").addEventListener("change", ruleUI);
-document.getElementById("scale").addEventListener("change", () => eqChart && (eqChart.options.scales.y.type = document.getElementById("scale").value, eqChart.update()));
-loadTickers().then(() => {
-  const q = new URLSearchParams(location.search);
-  for (const [k, id] of [["ticker", "ticker"], ["start", "start"], ["end", "end"], ["expense_ratio", "er"], ["slippage", "slip"], ["entry_dow", "entry"], ["exit_dow", "exit"], ["split", "split"], ["sma", "sma"], ["satellite", "sat"], ["rule", "rule"], ["breakout_n", "bn"], ["hold_bars", "bh"]]) if (q.has(k)) document.getElementById(id).value = q.get(k);
-  ruleUI(); run();
-});
 // -------- Cross-exchange tab --------
+let xGapChart, xSweepChart, xDurChart;
 const bp = (v, d = 1) => v == null ? "–" : v.toFixed(d) + " bp";
 const ms = v => v == null ? "–" : v >= 10000 ? (v / 1000).toFixed(0) + " s" : v >= 1000 ? (v / 1000).toFixed(1) + " s" : Math.round(v) + " ms";
 function xParams() {
@@ -747,6 +196,7 @@ function renderCrossex(d) {
   });
 }
 document.getElementById("fCrossex").addEventListener("submit", runCrossex);
+runCrossex();
 </script>
 </body>
 </html>
