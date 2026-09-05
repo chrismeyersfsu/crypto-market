@@ -9,7 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 
-from . import crossex
+from . import cbtri, crossex
 
 
 @asynccontextmanager
@@ -19,8 +19,12 @@ async def lifespan(_):
     collector = crossex.Collector()
     collector.start()
     app.state.collector = collector
+    watcher = cbtri.Watcher()  # every Coinbase triangle, from its order-book stream
+    watcher.start()
+    app.state.watcher = watcher
     yield
     collector.stop()
+    watcher.stop()
 
 
 app = FastAPI(title="crypto-market", lifespan=lifespan)
@@ -97,11 +101,24 @@ def triangle(
             "history_venues": [v for v in crossex.triangle_venues() if all(v in crossex.history_venues(x) for x in crossex.TRIANGLE)]}
 
 
-@app.get("/api/triangle/scan")
-def triangle_scan(fee: float = Query(2, ge=0, le=100), hours: float = Query(24, ge=0.1, le=48)):
-    r = crossex.triangle_scan(fee, hours)
+@app.get("/api/coinbase/triangles")
+def coinbase_triangles(
+    coin_fee: float = Query(60, ge=0, le=200, description="basis points per fill on an ordinary pair"),
+    stable_fee: float = Query(60, ge=0, le=200, description="basis points per fill on a stable pair such as USDT-USD"),
+    latency_ms: int = Query(150, ge=0, le=60_000, description="how late after a mismatch opens your first order could arrive"),
+    hours: float = Query(24, ge=0.1, le=48),
+):
+    watcher = getattr(app.state, "watcher", None)
+    r = cbtri.report(coin_fee, stable_fee, latency_ms, hours, watcher.now() if watcher else None)
     r["rows"] = [{k: _clean(v) for k, v in row.items()} for row in r["rows"]]
+    r["feed"] = {"connected": watcher.connected, "updates": watcher.updates, "products": len(watcher.books)} if watcher else None
     return r
+
+
+@app.get("/api/coinbase/triangles/detail")
+def coinbase_triangle_detail(coin: str = Query(..., max_length=12), via: str = Query(..., pattern="^(BTC|ETH|USDT)$"),
+                             dir: int = Query(1, ge=1, le=2), hours: float = Query(24, ge=0.1, le=48)):
+    return cbtri.detail(coin.upper(), via, dir, hours)
 
 
 @app.get("/api/markets")

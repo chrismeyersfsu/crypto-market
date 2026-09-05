@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cross-exchange gap</title>
+<title>Coinbase triangles</title>
 <style>
   :root {
     color-scheme: light;
@@ -37,12 +37,48 @@
   .pos { color: var(--good) } .neg { color: var(--bad) }
   .verdict { font-size: 15px; margin: 0 0 6px } .verdict b { font-weight: 600 }
   .err { color: var(--bad) }
+  tr.pick { cursor: pointer } tr.pick:hover td { background: var(--grid) } tr.picked td { font-weight: 600 }
+  details > summary { cursor: pointer; font-size: 16px; font-weight: 600; margin: 24px 0 8px }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px }
   .tile { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px } .tile .k { font-size: 12px; color: var(--muted) } .tile .v { font-size: 22px; font-weight: 600 }
 </style>
 </head>
 <body>
 <main>
+  <section id="viewCb">
+  <h1>Coinbase triangles: do its own three prices ever disagree — for long enough to catch?</h1>
+  <p class="sub">Every coin Coinbase lists both in dollars and in BTC, ETH or USDT is a triangle: its three prices should agree (<code>X/USD == X/Q × Q/USD</code>). When they don't, three trades in a loop — dollars → coin → bridge → dollars, or the reverse — end with more dollars than they started with, before fees. Nothing leaves the exchange and no second account is involved; the cost is three fees and whatever has moved by the time the orders land. This server keeps every one of those order books from Coinbase's own feed and re-prices both loops of every triangle each time one of its three books changes, so the numbers below are what a bot sitting on the same feed would have seen, down to the millisecond.</p>
+  <form id="fCb">
+    <label>Fee per fill, ordinary pair (bp) <input type="number" id="cFee" value="60" step="1" min="0" max="200"></label>
+    <label>Fee per fill, stable pair (bp) <input type="number" id="cStable" value="60" step="0.5" min="0" max="200"></label>
+    <label>Your latency (ms) <input type="number" id="cLat" value="150" step="10" min="0" max="60000"></label>
+    <label>Window (h) <input type="number" id="cHours" value="24" step="1" min="1" max="48"></label>
+    <button class="primary">Run</button>
+    <span id="cStatus" class="hint"></span>
+  </form>
+  <p class="hint">1 bp = 0.01%. A loop needs its orders filled immediately, which means paying Coinbase's taker rate. By 30-day volume: under $10k traded, 60 bp; $10k+, 40; $50k+, 25; $100k+, 20; $1M+, 18; $15M+, 16; $75M+, 10; $250M+, 6; $400M+, 4. Resting an order is cheaper (40 bp at the bottom tier, 0 at the top) but a resting order waits to be filled, and the mismatch is gone by then. Coinbase's "stable pairs" cost 0.1–0.45 bp to take, but USDT/USD — the one that appears here — was reportedly dropped from that list in 2025, so the stable-pair box starts at the ordinary rate; set it to 0.5 if your account still gets the stable rate on USDT/USD. A loop through USDT pays two ordinary fees and one stable fee; a loop through BTC or ETH pays three ordinary fees. Latency is snapped to the nearest of 100, 250, 500 and 1000 ms, which is what the recorder keeps.</p>
+
+  <div class="card">
+    <p class="verdict" id="cVerdict"></p>
+    <div class="tiles" id="cTiles"></div>
+  </div>
+
+  <div class="card">
+    <h2>Every loop, best first</h2>
+    <p class="hint">"Now" is the loop's gross mismatch at the latest book update. "Median" and "90th" are over samples taken every 20 seconds; "Best" is the largest mismatch seen at any book update, with the dollars the thinnest of the three books allowed at that moment. "Positive" is the share of recorded time the loop was above zero before fees, and an episode is one unbroken stretch of that. "After latency" is the share of episodes still positive when your first order could have arrived, using the quote that was standing at that moment. "Beat fees" counts episodes where what was left after your latency exceeded the loop's three fees, and "$ / day" is what taking every one of those, on the size available at the peak, would have paid. Click a row to see that loop over time. A big number on a coin with tiny size is a quote on a market nobody trades, not money.</p>
+    <div style="overflow-x:auto"><table id="cTable"></table></div>
+  </div>
+
+  <div class="card">
+    <h2 id="cDetailTitle">One loop over time</h2>
+    <p class="hint" id="cDetailHint">Click a row above.</p>
+    <div class="chart"><canvas id="cChart"></canvas></div>
+    <div style="overflow-x:auto"><table id="cEpisodes"></table></div>
+  </div>
+  </section>
+
+  <details id="more">
+  <summary>Everything else: the same coin across exchanges, and the BTC/USDT/USD triangle on other venues</summary>
   <section id="viewCrossex">
   <h1>Is the same coin ever cheaper on one exchange than another — for long enough to catch?</h1>
   <p class="sub">The one fast, small edge that is actually well-defined: buy a coin where it's cheap, sell it where it's dear, at the same moment. BTC is the obvious market; the stablecoins (USDT, USDC, priced in dollars and in each other) are the interesting one — their price barely moves, so what's left is purely the venues disagreeing with each other, and several venues charge far less on these pairs. Two datasets, two questions. Thirty days of 1-minute bars (public) say whether a gap <em>exists</em> and whether a "see it this minute, trade it the next" rule makes money after fees. Live best-bid/best-ask ticks, recorded by this server from each venue's public feed since it last started, say how many <em>milliseconds</em> a gap lasts — the number that decides whether a home connection could ever reach it.</p>
@@ -123,13 +159,8 @@
     <div style="overflow-x:auto"><table id="tLive"></table></div>
   </div>
 
-  <div class="card">
-    <h2>Every triangle on Coinbase, scanned once a minute</h2>
-    <p class="hint" id="tScanHint"></p>
-    <p class="hint">Each coin Coinbase lists both in dollars and in BTC, ETH or USDT, both directions, at the best bid and ask at the moment of the scan. "Gross" is before fees; "beyond 3 fees" uses the fee box above. Sorted by median gross, best first. A big positive number on a coin with tiny size is a stale quote on a market nobody trades, not money.</p>
-    <div style="overflow-x:auto"><table id="tScan"></table></div>
-  </div>
   </section>
+  </details>
 </main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -298,26 +329,88 @@ function renderTriangle(d) {
     rows.map(p => `<tr><td>${cap(p.venue)}</td><td>${p.route}</td><td class="${signCls(p.level_bp)}">${bp(p.level_bp)}</td><td>${p.episodes.toLocaleString()}</td><td>${pct(p.share_time, 1)}</td><td>${ms(p.median_ms)}</td><td>${ms(p.p90_ms)}</td><td>${ms(p.max_ms)}</td><td>${pct(p.share_open_after_latency, 0)}</td><td class="${signCls(p.capture_bp_per_day)}">${bp(p.capture_bp_per_day, 1)}</td><td>${p.median_size_usd == null ? "–" : money(p.median_size_usd)}</td><td>${p.median_profit_usd == null ? "–" : "$" + p.median_profit_usd.toFixed(2)}</td></tr>`).join("")
     : "";
 }
-async function runScan() {
-  const g = id => document.getElementById(id).value;
-  const r = await fetch("/api/triangle/scan?" + new URLSearchParams({ fee: g("tFee") || 0, hours: g("tHours") || 24 }));
-  if (!r.ok) return;
-  const d = await r.json(), fee = +g("tFee") || 0;
-  document.getElementById("tScanHint").textContent = d.scans ?
-    `${d.scans.toLocaleString()} scans of ${d.triangles} triangles since ${new Date(d.since * 1000).toLocaleString()}.` :
-    "No scans yet — the first runs a few seconds after the server starts.";
-  document.getElementById("tScan").innerHTML = d.rows.length ?
-    `<tr><th>Route</th><th>Latest gross</th><th>Median gross</th><th>90th pct</th><th>Best seen</th><th>Beyond ${3 * fee} bp</th><th>Size</th><th>$ per scan</th></tr>` +
-    d.rows.map(p => `<tr><td>${p.route}</td><td class="${signCls(p.latest_bp)}">${bp(p.latest_bp)}</td><td class="${signCls(p.median_bp)}">${bp(p.median_bp)}</td><td>${bp(p.p90_bp)}</td><td>${bp(p.best_bp)}</td><td>${pct(p.share_beyond_cost, 0)}</td><td>${money(p.median_size_usd)}</td><td>$${p.median_profit_usd.toFixed(2)}</td></tr>`).join("") : "";
+// -------- Coinbase triangles --------
+let cReq = 0, cChart, cPicked = null, cTimer;
+const cParams = () => { const g = id => document.getElementById(id).value; return { coin_fee: g("cFee") || 0, stable_fee: g("cStable") || 0, latency_ms: g("cLat") || 0, hours: g("cHours") || 24 }; };
+async function runCb(e) {
+  e && e.preventDefault();
+  const status = document.getElementById("cStatus"), mine = ++cReq;
+  status.textContent = "loading…"; status.className = "hint";
+  const r = await fetch("/api/coinbase/triangles?" + new URLSearchParams(cParams()));
+  if (mine !== cReq) return;
+  if (!r.ok) { status.textContent = (await r.json()).detail; status.className = "err"; return; }
+  renderCb(await r.json()); status.textContent = "";
+  if (cPicked) runCbDetail(cPicked);
+  clearTimeout(cTimer); cTimer = setTimeout(runCb, 60000);  // the "now" column and the tallies move; keep them fresh
 }
-document.getElementById("fTri").addEventListener("submit", e => { runTriangle(e); runScan(); });
-runScan();
-runTriangle();
+function renderCb(d) {
+  const p = cParams(), rows = d.rows, lat = d.latency_ms_used;
+  const everPos = rows.filter(r => r.episodes > 0), beat = rows.reduce((a, r) => a + r.beyond_cost, 0), perDay = rows.reduce((a, r) => a + r.usd_per_day, 0);
+  const best = rows.filter(r => r.best_bp != null).sort((a, b) => b.best_bp - a.best_bp)[0];
+  const top = rows[0], feed = d.feed;
+  document.getElementById("cVerdict").innerHTML = !d.alive_h ?
+    `Nothing recorded yet — the feed ${feed?.connected ? "connected " + Math.round(Date.now() / 1000 - feed.connected) + " s ago; the first samples land in a moment" : "is still connecting"}.` :
+    `${d.triangles} triangles, ${rows.length} loops, ${d.alive_h.toFixed(1)} hours of Coinbase's order books recorded in the last ${p.hours} h. ` +
+    `<b>${everPos.length}</b> of ${rows.length} loops were positive before fees at some point; the best-behaved is <b>${top.route}</b> with a median of ${bp(top.median_bp, 2)}, positive ${pct(top.share_time, 0)} of the time, on about ${money(top.median_size_usd)}. ` +
+    (best ? `The largest single mismatch was <b>${best.route}</b> at ${bp(best.best_bp, 2)} on ${money(best.best_size_usd)}. ` : "") +
+    `At your fees (${p.coin_fee} bp on an ordinary pair, ${p.stable_fee} on a stable pair, so ${2 * p.coin_fee + +p.stable_fee} bp for a loop through USDT and ${3 * p.coin_fee} through BTC or ETH), ` +
+    (beat ? `<b>${beat.toLocaleString()}</b> episodes still beat the cost after ${lat} ms of latency, worth about <b>${money(perDay)} a day</b> on the size that was there.` : `<b>no</b> episode beat the cost after ${lat} ms of latency.`);
+  document.getElementById("cTiles").innerHTML = [
+    ["Loops watched", rows.length], ["Book updates", feed ? feed.updates.toLocaleString() : "–"], ["Recorded", d.alive_h ? d.alive_h.toFixed(1) + " h" : "–"],
+    ["Loops ever positive", everPos.length], ["Episodes", rows.reduce((a, r) => a + r.episodes, 0).toLocaleString()],
+    ["Beat fees after " + lat + " ms", beat.toLocaleString()], ["$ per day", money(perDay)],
+  ].map(([k, v]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+  const key = r => `${r.coin}|${r.via}|${r.dir}`;
+  document.getElementById("cTable").innerHTML =
+    `<tr><th>Route</th><th>Now</th><th>Median</th><th>90th</th><th>Best</th><th>Size at best</th><th>Positive</th><th>Episodes</th><th>Median length</th><th>Longest</th><th>After ${lat} ms</th><th>Cost</th><th>Beat fees</th><th>$ / day</th></tr>` +
+    rows.map(r => `<tr class="pick${cPicked === key(r) ? " picked" : ""}" data-k="${key(r)}"><td>${r.route}</td><td class="${signCls(r.now_bp)}">${bp(r.now_bp, 2)}</td><td class="${signCls(r.median_bp)}">${bp(r.median_bp, 2)}</td><td class="${signCls(r.p90_bp)}">${bp(r.p90_bp, 2)}</td><td class="${signCls(r.best_bp)}">${bp(r.best_bp, 2)}</td><td>${money(r.best_size_usd)}</td><td>${pct(r.share_time, 1)}</td><td>${r.episodes.toLocaleString()}</td><td>${ms(r.median_ms)}</td><td>${ms(r.max_ms)}</td><td>${r.episodes ? pct(r.share_open_after_latency, 0) : "–"}</td><td>${bp(r.cost_bp, 0)}</td><td>${r.beyond_cost.toLocaleString()}</td><td class="${r.usd_per_day > 0 ? "pos" : ""}">${r.usd_per_day > 0 ? "$" + r.usd_per_day.toFixed(2) : "–"}</td></tr>`).join("");
+  for (const tr of document.querySelectorAll("#cTable tr.pick")) tr.addEventListener("click", () => {
+    cPicked = tr.dataset.k; document.querySelectorAll("#cTable tr.picked").forEach(x => x.classList.remove("picked")); tr.classList.add("picked"); runCbDetail(cPicked);
+  });
+  if (!cPicked && rows.length) { cPicked = key(rows[0]); document.querySelector("#cTable tr.pick")?.classList.add("picked"); runCbDetail(cPicked); }
+}
+async function runCbDetail(k) {
+  const [coin, via, dir] = k.split("|"), p = cParams();
+  const r = await fetch("/api/coinbase/triangles/detail?" + new URLSearchParams({ coin, via, dir, hours: p.hours }));
+  if (!r.ok || cPicked !== k) return;
+  const d = await r.json(), lat = [100, 250, 500, 1000].reduce((a, b) => Math.abs(b - p.latency_ms) < Math.abs(a - p.latency_ms) ? b : a);
+  const cost = d.legs.reduce((a, l) => a + (["USDT-USD", "USDC-USD", "USDT-USDC", "DAI-USD", "PYUSD-USD"].includes(l) ? +p.stable_fee : +p.coin_fee), 0);
+  document.getElementById("cDetailTitle").textContent = d.route;
+  document.getElementById("cDetailHint").textContent = `Books: ${d.legs.join(", ")}. Gross mismatch sampled every 20 s (one point per sample; the episode list below has millisecond timing). The dashed line is your three fees, ${cost} bp.`;
+  const t = d.series.t.map(x => new Date(x * 1000));
+  cChart?.destroy();
+  cChart = new Chart(document.getElementById("cChart"), {
+    type: "line",
+    data: { labels: t, datasets: [
+      { label: "Gross mismatch", data: d.series.gross, borderColor: css("--s1"), borderWidth: 1, pointRadius: 0 },
+      { label: "Three fees", data: d.series.gross.map(() => cost), borderColor: css("--s2"), borderWidth: 1, borderDash: [4, 4], pointRadius: 0 },
+      { label: "Zero", data: d.series.gross.map(() => 0), borderColor: css("--axis"), borderWidth: 1, pointRadius: 0 },
+    ] },
+    options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { title: i => t[i[0].dataIndex].toLocaleString(), label: c => c.datasetIndex === 0 ? ` ${bp(c.parsed.y, 2)}, size ${money(d.series.size[c.dataIndex])}` : null } } },
+      scales: { x: { ticks: { maxTicksLimit: 8, maxRotation: 0, callback: (v, i) => t[i].toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }, grid: { display: false } },
+                y: { ticks: { callback: v => v + " bp", maxTicksLimit: 7 }, grid: { color: css("--grid") } } } }
+  });
+  document.getElementById("cEpisodes").innerHTML = d.episodes.length ?
+    `<tr><th>Opened</th><th>Lasted</th><th>Opened at</th><th>Peak</th><th>Size at peak</th><th>After ${lat} ms</th><th>Net after fees</th><th>Book updates</th></tr>` +
+    d.episodes.map(e => { const net = (e["bp_at_" + lat] - cost) / 1e4 * e.max_size_usd; return `<tr><td>${new Date(e.start).toLocaleString()}</td><td>${ms(e.ms)}${e.broken ? " (feed dropped)" : ""}</td><td>${bp(e.open_bp, 2)}</td><td class="pos">${bp(e.max_bp, 2)}</td><td>${money(e.max_size_usd)}</td><td class="${signCls(e["bp_at_" + lat] || -1)}">${e["bp_at_" + lat] > 0 ? bp(e["bp_at_" + lat], 2) : "gone"}</td><td class="${signCls(net)}">${e["bp_at_" + lat] > 0 ? "$" + net.toFixed(2) : "–"}</td><td>${e.updates}</td></tr>`; }).join("")
+    : "<tr><td>No positive episode in the window.</td></tr>";
+}
+document.getElementById("fCb").addEventListener("submit", runCb);
+runCb();
+
+// -------- the rest loads when opened --------
+document.getElementById("fTri").addEventListener("submit", runTriangle);
 document.getElementById("fCrossex").addEventListener("submit", runCrossex);
 document.getElementById("xMarket").addEventListener("change", xMarketChanged);
 xMarketChanged();
-fetch("/api/markets").then(r => r.json()).then(j => { MK = j; xMarketChanged(); });
-runCrossex();
+let moreLoaded = false;
+document.getElementById("more").addEventListener("toggle", e => {
+  if (!e.target.open || moreLoaded) return;
+  moreLoaded = true;
+  fetch("/api/markets").then(r => r.json()).then(j => { MK = j; xMarketChanged(); });
+  runCrossex(); runTriangle();
+});
 </script>
 </body>
 </html>

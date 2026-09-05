@@ -456,8 +456,7 @@ class Collector:
     def start(self):
         venues = {ex for m in MARKETS.values() for ex in m} - {"base"}
         self.tasks = ([asyncio.create_task(self._feed(ex)) for ex in sorted(venues)]
-                      + [asyncio.create_task(self._pool_feed()), asyncio.create_task(self._flush()),
-                         asyncio.create_task(scan_loop())])
+                      + [asyncio.create_task(self._pool_feed()), asyncio.create_task(self._flush())])
 
     def stop(self):
         for t in self.tasks:
@@ -626,97 +625,3 @@ def triangle_live(df: pd.DataFrame, fee_bp: float, latency_ms: int, alive_ts=Non
             out.append({"venue": ex, "route": route, "level_bp": float(edge.median() + 3 * fee_bp),
                         **_runs(t, edge.values, size.values, latency_ms, h, span_h)})
     return {"routes": out, "per_venue": per_venue}
-
-
-# ---------------------------------------------------------------- Coinbase: every triangle
-
-SCAN_FILE = CACHE_DIR / "triscan_coinbase.csv"
-SCAN_S = 60
-SCAN_COLS = ["ts", "coin", "via", "route", "gross_bp", "size_usd"]
-
-
-def coinbase_triangles() -> list[tuple[str, str]]:
-    """(coin, bridge) for every coin that Coinbase lists both in dollars and
-    in a bridge currency that is itself listed in dollars: BTC, ETH, USDT."""
-    ps = httpx.get("https://api.exchange.coinbase.com/products", timeout=20).json()
-    pairs = {(p["base_currency"], p["quote_currency"]) for p in ps if p["status"] == "online" and not p.get("trading_disabled")}
-    return sorted((x, q) for x, q in pairs if q in ("BTC", "ETH", "USDT") and (x, "USD") in pairs and (q, "USD") in pairs)
-
-
-async def scan_coinbase(triangles: list[tuple[str, str]]) -> list[tuple]:
-    """One pass over every triangle at Coinbase's current best bid/ask: the
-    gross round-trip profit in basis points, both directions, and the
-    dollars the thinnest leg allowed. Positive means the three prices are
-    inconsistent by that much before fees."""
-    products = sorted({f"{x}-USD" for x, _ in triangles} | {f"{x}-{q}" for x, q in triangles} | {f"{q}-USD" for _, q in triangles})
-    sem = asyncio.Semaphore(2)  # public limit is 10 requests a second; stay well under it
-
-    async def book(http, pid):
-        async with sem:
-            try:
-                r = await http.get(f"https://api.exchange.coinbase.com/products/{pid}/book", params={"level": 1})
-                j = r.json()
-                await asyncio.sleep(0.25)
-                return pid, (float(j["bids"][0][0]), float(j["asks"][0][0]), float(j["bids"][0][1]), float(j["asks"][0][1]))
-            except Exception as e:
-                log.warning("coinbase book %s: %s", pid, e)
-                return pid, None
-    async with httpx.AsyncClient(timeout=15) as http:
-        q = dict(await asyncio.gather(*(book(http, pid) for pid in products)))
-    ts, rows = int(time.time() * 1000), []
-    for x, br in triangles:
-        xu, xq, qu = q.get(f"{x}-USD"), q.get(f"{x}-{br}"), q.get(f"{br}-USD")
-        if not (xu and xq and qu):
-            continue
-        # dollars -> coin (pay X/USD ask) -> bridge (sell at X/Q bid) -> dollars (sell bridge at Q/USD bid)
-        rows.append((ts, x, br, f"USD → {x} → {br} → USD", (xq[0] * qu[0] / xu[1] - 1) * 1e4,
-                     min(xu[3] * xu[1], xq[2] * xq[0] * qu[0], qu[2] * qu[0])))
-        # dollars -> bridge (pay Q/USD ask) -> coin (pay X/Q ask) -> dollars (sell at X/USD bid)
-        rows.append((ts, x, br, f"USD → {br} → {x} → USD", (xu[0] / (qu[1] * xq[1]) - 1) * 1e4,
-                     min(qu[3] * qu[1], xq[3] * xq[1] * qu[1], xu[2] * xu[0])))
-    return rows
-
-
-async def scan_loop():
-    """Runs with the collector: every triangle on Coinbase once a minute, appended to SCAN_FILE."""
-    CACHE_DIR.mkdir(exist_ok=True)
-    triangles, listed = [], 0.0
-    while True:
-        try:
-            if time.time() - listed > 3600:
-                triangles, listed = await asyncio.to_thread(coinbase_triangles), time.time()
-            rows = await scan_coinbase(triangles)
-            new = not SCAN_FILE.exists()
-            with SCAN_FILE.open("a", newline="") as f:
-                w = csv.writer(f)
-                if new:
-                    w.writerow(SCAN_COLS)
-                w.writerows(rows)
-        except Exception as e:
-            log.warning("coinbase triangle scan: %s", e)
-        await asyncio.sleep(SCAN_S)
-
-
-def triangle_scan(fee_bp: float, hours: float = 24) -> dict:
-    """Every Coinbase triangle over the last `hours` of scans: latest and
-    median gross mismatch per direction, how often it beat three fees, and
-    the dollars it was good for. Sorted by median gross, best first."""
-    if not SCAN_FILE.exists():
-        return {"rows": [], "scans": 0}
-    df = pd.read_csv(SCAN_FILE)
-    df = df[df["ts"] >= (time.time() - hours * 3600) * 1000]
-    if len(df) > 400_000:  # keep the file to a couple of days
-        df.to_csv(SCAN_FILE, index=False)
-    cost = 3 * fee_bp
-    out = []
-    for (coin, via, route), g in df.groupby(["coin", "via", "route"]):
-        g = g.sort_values("ts")
-        out.append({"coin": coin, "via": via, "route": route, "scans": int(len(g)),
-                    "latest_bp": float(g["gross_bp"].iloc[-1]), "median_bp": float(g["gross_bp"].median()),
-                    "p90_bp": float(g["gross_bp"].quantile(0.9)), "best_bp": float(g["gross_bp"].max()),
-                    "share_beyond_cost": float((g["gross_bp"] > cost).mean()),
-                    "median_size_usd": float(g["size_usd"].median()),
-                    "median_profit_usd": float(((g["gross_bp"] - cost).clip(lower=0) / 1e4 * g["size_usd"]).median())})
-    out.sort(key=lambda r: -r["median_bp"])
-    return {"rows": out, "scans": int(df["ts"].nunique()), "triangles": int(df.groupby(["coin", "via"]).ngroups),
-            "since": float(df["ts"].min() / 1000) if len(df) else None}

@@ -1,13 +1,34 @@
 # crypto-market
 
-Is the same coin ever cheaper on one exchange than another, for long enough
-to catch? And, within one exchange, do its own prices ever disagree with
-each other?
+Do Coinbase's own three prices for a coin ever disagree with each other,
+for long enough to catch? And is the same coin ever cheaper on one
+exchange than another?
 
     uv sync
     uv run crypto-market        # http://127.0.0.1:8870
 
-## Across exchanges
+## Coinbase triangles (the main page)
+
+Every coin Coinbase lists both in dollars and in a bridge currency (BTC,
+ETH or USDT) that is itself listed in dollars is a triangle -- about fifty
+of them, a hundred loops counting both directions. The three prices should
+agree: X/USD == X/Q x Q/USD. When they don't, dollars -> X -> Q -> dollars
+(or the reverse) ends with more dollars than it started with, before fees.
+
+`cbtri.py` holds one WebSocket connection to Coinbase's `level2_batch`
+feed carrying all ~90 order books (about 300 updates a second) and
+re-prices both loops of a triangle every time one of its three books
+changes. It keeps two files, both rolling 48 hours: `cbtri_samples.csv`,
+every loop's gross mismatch every 20 seconds, and `cbtri_episodes.csv`,
+one row per unbroken stretch of a loop being positive -- when it opened,
+how long it lasted, its peak and the dollars the thinnest book allowed at
+the peak, and the quote that was standing 100, 250, 500 and 1000 ms after
+it opened, which is what an order sent on seeing it would actually get.
+The page ranks every loop, charts one, and lists its episodes; fees are
+per fill with a separate rate for Coinbase's stable pairs, so a loop
+through USDT costs two ordinary fees and one stable fee.
+
+## Across exchanges (under "Everything else")
 
 Markets: BTC/USD, ETH/USD, BTC/USDT, and the stablecoins against the dollar
 and each other (USDT/USD, USDC/USD, USDC/USDT). The stablecoins are the
@@ -41,22 +62,12 @@ supply. Collector downtime is detected from the union of all markets'
 ticks, so a stablecoin quote sitting unchanged for minutes is not mistaken
 for an outage.
 
-## Within one exchange (triangles)
+## The BTC/USDT/USD triangle on the other venues
 
-On one venue, BTC/USD should equal BTC/USDT × USDT/USD. When it doesn't,
-three trades in a loop (dollars → BTC → USDT → dollars, or the reverse)
-would end with more dollars than they started with. The triangle section
-checks this two ways: 30 days of minute closes, and live from the recorded
-bids and asks, which is the honest one -- the minute-close version reports
-"gaps" on thin BTC/USDT markets that are just stale prints.
-
-A separate scan lists every triangle Coinbase offers (every coin that
-trades against USD and also against BTC, ETH or USDT -- about fifty),
-reads the best bid and ask of all three legs once a minute, and keeps the
-results in `data/triscan_coinbase.csv`. The table shows each loop's gross
-mismatch now, its median and best over the window, how often it exceeded
-the fee you supply, and how many dollars the smallest of the three books
-would let through.
+The same check for the one triangle every venue has: 30 days of minute
+closes, and live from the recorded bids and asks, which is the honest one
+-- the minute-close version reports "gaps" on thin BTC/USDT markets that
+are just stale prints.
 
 ## Findings so far
 
@@ -72,7 +83,11 @@ both directions -- exactly its own fee -- with about $2-3k of depth within
 1 bp.
 
 Triangles. Using real bids and asks, the BTC/USDT/USD loop loses money
-before fees on every venue in both directions (-0.1 to -5 bp). Across all
-fifty Coinbase triangles the best routes hover at zero to +1 bp with a few
-hundred dollars of size; most are negative, some by 50-100 bp on illiquid
-coins. Nothing there clears even Coinbase's cheapest fee.
+before fees on every venue in both directions (-0.1 to -5 bp). On
+Coinbase's full set, the loops that are ever positive are the ones through
+BTC, ETH and USDT on the big coins, by a fraction of a basis point to
+about 1.5 bp, on a few hundred dollars, for seconds at a time; the rest
+are negative, some by 50-100 bp on coins nobody trades. Coinbase's
+taker rate is 60 bp per fill at the bottom tier and 4 bp at the top
+($400M a month), so a loop costs 12-180 bp; nothing seen so far comes
+close to even the top tier.
