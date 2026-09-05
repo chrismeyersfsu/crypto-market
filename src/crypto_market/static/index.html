@@ -45,9 +45,10 @@
 <main>
   <section id="viewCrossex">
   <h1>Is the same coin ever cheaper on one exchange than another — for long enough to catch?</h1>
-  <p class="sub">The one fast, small edge that is actually well-defined: buy BTC where it's cheap, sell it where it's dear, at the same moment. Two datasets, two questions. Thirty days of 1-minute bars from three venues (public) say whether a gap <em>exists</em> and whether a "see it this minute, trade it the next" rule makes money after fees. Live best-bid/best-ask ticks, recorded by this server from each venue's public feed since it last started, say how many <em>milliseconds</em> a gap lasts — the number that decides whether a home connection could ever reach it.</p>
+  <p class="sub">The one fast, small edge that is actually well-defined: buy a coin where it's cheap, sell it where it's dear, at the same moment. BTC is the obvious market; the stablecoins (USDT, USDC, priced in dollars and in each other) are the interesting one — their price barely moves, so what's left is purely the venues disagreeing with each other, and several venues charge far less on these pairs. Two datasets, two questions. Thirty days of 1-minute bars (public) say whether a gap <em>exists</em> and whether a "see it this minute, trade it the next" rule makes money after fees. Live best-bid/best-ask ticks, recorded by this server from each venue's public feed since it last started, say how many <em>milliseconds</em> a gap lasts — the number that decides whether a home connection could ever reach it.</p>
 
   <form id="fCrossex">
+    <label>Market <select id="xMarket"><option value="btcusd">BTC/USD</option><option value="usdtusd">USDT/USD</option><option value="usdcusd">USDC/USD</option><option value="usdcusdt">USDC/USDT</option></select></label>
     <label>Venue A <select id="xA"><option value="coinbase">Coinbase</option><option value="bitstamp">Bitstamp</option><option value="bitfinex">Bitfinex</option><option value="binanceus">Binance.US</option></select></label>
     <label>Venue B <select id="xB"><option value="coinbase">Coinbase</option><option value="bitstamp" selected>Bitstamp</option><option value="bitfinex">Bitfinex</option><option value="binanceus">Binance.US</option></select></label>
     <label>Fee per fill (bp) <input type="number" id="xFee" value="1" step="0.5" min="0" max="100"></label>
@@ -56,7 +57,7 @@
     <button class="primary">Run</button>
     <span id="xStatus" class="hint"></span>
   </form>
-  <p class="hint">1 bp = 0.01%. Retail fee tiers for a market order: Coinbase ≈ 60 bp, Bitstamp ≈ 40, Kraken ≈ 26, Bitfinex ≈ 20, Binance.US 0 on BTC/USD — but see the "size" column below for what a zero-fee venue's order book actually holds at the best price. Every round trip here pays the fee four times (buy and sell on both venues, then unwind both).</p>
+  <p class="hint" id="xFeeHint"></p>
 
   <div class="card">
     <p class="verdict" id="xVerdict"></p>
@@ -115,9 +116,24 @@ Chart.defaults.plugins.tooltip.borderWidth = 1;
 let xGapChart, xSweepChart, xDurChart;
 const bp = (v, d = 1) => v == null ? "–" : v.toFixed(d) + " bp";
 const ms = v => v == null ? "–" : v >= 10000 ? (v / 1000).toFixed(0) + " s" : v >= 1000 ? (v / 1000).toFixed(1) + " s" : Math.round(v) + " ms";
+const MARKET_NAMES = { btcusd: "BTC/USD", usdtusd: "USDT/USD", usdcusd: "USDC/USD", usdcusdt: "USDC/USDT" };
+const FEE_HINTS = {
+  btcusd: `1 bp = 0.01%. Retail fee tiers for a market order on BTC: Coinbase ≈ 60 bp, Bitstamp ≈ 40, Kraken ≈ 26, Bitfinex ≈ 20, Binance.US 0 — but see the "size" column below for what a zero-fee venue's order book actually holds at the best price. Every round trip here pays the fee four times (buy and sell on both venues, then unwind both).`,
+  stable: `1 bp = 0.01%. Stablecoin pairs sit on a separate, cheaper fee schedule at most venues (retail tier, taker/market order): Binance.US 2 bp (0 to rest an order), Bitstamp 8 bp (6 to rest), Coinbase ≈ 0.5 bp on its "stable pairs" (0 to rest — but USDT pairs were reportedly moved off that schedule in 2025; check the live fee page), Kraken a flat 20 bp, Bitfinex 0 but closed to US customers. Coinbase also converts USDC to dollars 1:1 with no fee, which is what pins USDC near $1 everywhere. Every round trip here pays the fee four times (buy and sell on both venues, then unwind both). Kraken has no 30-day minute history here (its public candles keep twelve hours), so it appears in the live section only.`,
+};
+let MK = null;  // /api/markets: which venues carry history and live ticks for each market
+function xMarketChanged() {
+  const market = document.getElementById("xMarket").value, hist = MK ? MK[market].history : null;
+  for (const id of ["xA", "xB"]) {
+    const sel = document.getElementById(id);
+    for (const o of sel.options) o.disabled = hist ? !hist.includes(o.value) : false;
+    if (sel.selectedOptions[0]?.disabled) sel.value = hist.find(v => v !== document.getElementById(id === "xA" ? "xB" : "xA").value);
+  }
+  document.getElementById("xFeeHint").textContent = FEE_HINTS[market === "btcusd" ? "btcusd" : "stable"];
+}
 function xParams() {
   const g = id => document.getElementById(id).value;
-  return new URLSearchParams({ a: g("xA"), b: g("xB"), fee: g("xFee") || 0, latency_ms: g("xLat") || 0, hours: g("xHours") || 24 });
+  return new URLSearchParams({ market: g("xMarket"), a: g("xA"), b: g("xB"), fee: g("xFee") || 0, latency_ms: g("xLat") || 0, hours: g("xHours") || 24 });
 }
 let xReq = 0;
 async function runCrossex(e) {
@@ -131,17 +147,17 @@ async function runCrossex(e) {
 }
 function renderCrossex(d) {
   const m = d.minutes, fee = +document.getElementById("xFee").value || 0, lat = +document.getElementById("xLat").value || 0;
-  const a = document.getElementById("xA").value, b = document.getElementById("xB").value;
+  const a = document.getElementById("xA").value, b = document.getElementById("xB").value, mk = MARKET_NAMES[d.market];
   const NAMES = { coinbase: "Coinbase", bitstamp: "Bitstamp", bitfinex: "Bitfinex", kraken: "Kraken", binanceus: "Binance.US" };
   const cap = s => NAMES[s] || s;
   const zeroFee = m.fee_sweep.find(x => x.fee_bp === 0), breakEven = m.fee_sweep.filter(x => x.trades > 0 && x.total_profit_bp > 0).map(x => x.fee_bp);
-  const maxOk = breakEven.length ? Math.max(...breakEven) : null;
+  const maxOk = breakEven.length ? Math.max(...breakEven) : null, cheapest = d.market === "btcusd" ? 16 : 2;  // Kraken maker on BTC; Binance.US taker on stable pairs
   document.getElementById("xVerdict").innerHTML =
-    `${cap(a)} vs ${cap(b)}, ${m.days.toFixed(0)} days of minute bars: the gap wobbles by a median of <b>${bp(m.abs_dev_median_bp)}</b> around a steady level of ${bp(m.level_bp)} (95th percentile ${bp(m.dev_p95_bp)}). ` +
+    `${mk} — ${cap(a)} vs ${cap(b)}, ${m.days.toFixed(0)} days of minute bars: the gap wobbles by a median of <b>${bp(m.abs_dev_median_bp)}</b> around a steady level of ${bp(m.level_bp)} (95th percentile ${bp(m.dev_p95_bp)}). ` +
     `At ${fee} bp per fill the see-it-then-trade-it rule found <b>${m.trades.toLocaleString()}</b> trades and made <b class="${signCls(m.total_profit_bp)}">${bp(m.total_profit_bp, 0)}</b> in total (${pct(m.total_profit_bp / 1e4, 2)} of capital). ` +
     (m.trades === 0 ? "Nothing ever exceeded the cost of four fills. " : "") +
     (maxOk == null ? `It is not profitable at <b>any</b> fee tested, including zero.` :
-      maxOk === 0 ? `It is only profitable with <b>zero</b> fees (${bp(zeroFee.total_profit_bp, 0)} over ${zeroFee.trades.toLocaleString()} trades — about ${bp(zeroFee.mean_profit_bp, 2)} each). Every real fee tier is 20–60× larger than the gap it would need to overcome.` :
+      maxOk === 0 ? `It is only profitable with <b>zero</b> fees (${bp(zeroFee.total_profit_bp, 0)} over ${zeroFee.trades.toLocaleString()} trades — about ${bp(zeroFee.mean_profit_bp, 2)} each). The cheapest real fee tier for this market (${cheapest} bp per fill) is ${(cheapest / Math.max(zeroFee.mean_profit_bp, 0.01)).toFixed(0)}× larger than the gap it would need to overcome.` :
       `It stays profitable up to about <b>${maxOk} bp</b> per fill — below any retail fee tier.`);
   document.getElementById("xTiles").innerHTML = [
     ["Steady level (A over B)", bp(m.level_bp, 2), null], ["Typical wobble", bp(m.abs_dev_median_bp, 2), null],
@@ -199,6 +215,9 @@ function renderCrossex(d) {
   });
 }
 document.getElementById("fCrossex").addEventListener("submit", runCrossex);
+document.getElementById("xMarket").addEventListener("change", xMarketChanged);
+xMarketChanged();
+fetch("/api/markets").then(r => r.json()).then(j => { MK = j; xMarketChanged(); });
 runCrossex();
 </script>
 </body>
