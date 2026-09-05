@@ -104,14 +104,14 @@ def triangle(
             "history_venues": [v for v in crossex.triangle_venues() if all(v in crossex.history_venues(x) for x in crossex.TRIANGLE)]}
 
 
-VENUE = "^(coinbase|binanceus)$"
+VENUE = "^(coinbase|binanceus|kraken)$"
 
 
 @app.get("/api/triangles")
 def triangles(
     venue: str = Query("coinbase", pattern=VENUE),
     coin_fee: float | None = Query(None, ge=0, le=200, description="basis points per immediate fill on an ordinary pair; default: the venue's bottom tier"),
-    stable_fee: float | None = Query(None, ge=0, le=200, description="basis points per immediate fill on the venue's reduced-rate pairs (Coinbase's stable pairs, Binance.US's Tier 0 pairs)"),
+    stable_fee: float | None = Query(None, ge=0, le=200, description="basis points per immediate fill on the venue's reduced-rate pairs (Coinbase's stable pairs, Binance.US's Tier 0 pairs, Kraken's stablecoin and currency pairs)"),
     latency_ms: int = Query(150, ge=0, le=60_000, description="how late after a mismatch opens your first order could arrive"),
     hours: float = Query(24, ge=0.1, le=48),
 ):
@@ -127,7 +127,7 @@ def triangles(
 
 @app.get("/api/triangles/detail")
 def triangle_detail(venue: str = Query("coinbase", pattern=VENUE), coin: str = Query(..., max_length=12),
-                    via: str = Query(..., pattern="^(BTC|ETH|USDT|USDC)$"), dir: int = Query(1, ge=1, le=2),
+                    via: str = Query(..., pattern="^(BTC|ETH|USDT|USDC|EUR)$"), dir: int = Query(1, ge=1, le=2),
                     hours: float = Query(24, ge=0.1, le=48),
                     coin_fee: float | None = Query(None, ge=0, le=200), stable_fee: float | None = Query(None, ge=0, le=200)):
     ven = cbtri.VENUES[venue]

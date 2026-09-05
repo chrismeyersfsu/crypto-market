@@ -1,10 +1,11 @@
 """Every triangle an exchange offers, watched from its own price feed.
 
 A triangle is a coin X that the exchange lists in dollars and also in a
-bridge currency Q (BTC, ETH, USDT or USDC) that is itself listed in
-dollars. The three prices should agree: X/USD == X/Q x Q/USD. When they
-don't, three trades in a loop end with more dollars than they started
-with, before fees. There are two loops per triangle:
+bridge currency Q (BTC, ETH, USDT, USDC, or on Kraken the euro) that is
+itself listed in dollars. The three prices should agree:
+X/USD == X/Q x Q/USD. When they don't, three trades in a loop end with
+more dollars than they started with, before fees. There are two loops
+per triangle:
 
     direction 1:  USD -> X -> Q -> USD   pay the X/USD ask, sell X at the X/Q bid, sell Q at the Q/USD bid
     direction 2:  USD -> Q -> X -> USD   pay the Q/USD ask, pay the X/Q ask, sell X at the X/USD bid
@@ -22,7 +23,7 @@ bookkeeping and the files -- is shared. Two files come out per venue:
 
 Coinbase keeps its full order books from the `level2_batch` stream and
 writes cbtri_*.csv; Binance.US reads its best-bid/ask stream and writes
-butri_*.csv.
+butri_*.csv; Kraken reads its `ticker` stream and writes krtri_*.csv.
 """
 from __future__ import annotations
 
@@ -235,7 +236,104 @@ class BinanceUS(Venue):
         return (d["s"], q) if q and d["s"] in books else None
 
 
-VENUES: dict[str, Venue] = {v.key: v for v in (Coinbase(), BinanceUS())}
+class Kraken(Venue):
+    """The WebSocket v2 `ticker` channel with `event_trigger: "bbo"`: one
+    message per change of a market's best bid or ask, with the size at
+    each, and a snapshot of every market on subscribe, so nothing is
+    seeded. One connection carries all ~1200 markets; the subscribe has
+    to be sent in batches, because a single message naming more than a
+    few hundred symbols gets the connection closed without a word (600
+    per message was accepted, 1000 was not; nothing in the docs says
+    where the line is).
+
+    Names: the REST `AssetPairs` list is the source of what is listed,
+    but its `base`/`quote` are Kraken's legacy codes (XXBT, ZUSD) and its
+    `wsname` is the v1 stream name (XBT/USD). The v2 stream wants
+    BTC/USD, DOGE/USD -- the wsname with XBT and XDG renamed -- and that
+    is also what the page shows. (Stripping a leading X/Z off 4-letter
+    codes would wreck XAUT, XION, ZETA and friends, so the wsname is
+    split instead.)
+
+    Fees: which schedule a pair is on comes from the same `AssetPairs`
+    response, each pair carrying its own tier table: 0.20% flat at the
+    bottom marks the stablecoin / currency schedule (EUR/USD, USDT/USD,
+    USDC/USD, TBTC/BTC ...), 0.01% marks the USDG pairs, anything else
+    is the ordinary schedule. The API's ordinary tier table is stale
+    against the website (it still says 0.40% for an immediate fill at
+    the bottom where the site says 0.80%), so only the classification is
+    taken from it; the rates are the website's."""
+
+    key, name, prefix = "kraken", "Kraken", "krtri"
+    bridges = ("BTC", "ETH", "USDT", "USDC", "EUR")
+    reduced_label = "stablecoin or currency pair"
+    default_fees = (80.0, 20.0)
+    url = "wss://ws.kraken.com/v2"
+    fee_hint = (
+        "1 bp = 0.01%. Kraken Pro's spot schedule, read from kraken.com/features/fee-schedule on 2026-09-05. A loop needs its "
+        "orders filled immediately, which means paying the rate for an immediate fill (the \"taker\" rate). On an ordinary pair, "
+        "by 30-day volume (or, since 2026, by the value of what you hold on Kraken, whichever gives the better tier): under $2.5k "
+        "traded, 80 bp; $2.5k+, 60; $10k+, 38; $25k+, 35; $50k+, 30; $100k+, 25; $250k+, 22; $500k+, 20; $1M+, 18; $2.5M+, 15; "
+        "$5M+, 12; $10M+, 10; $50M+ to $500M+, 9 down to 5. A resting order (one that waits on the book for someone else to fill it, "
+        "the \"maker\" rate) costs 40 bp at the bottom and 0 from $10M, but the mismatch is gone by the time it fills. Stablecoin "
+        "and currency pairs — EUR/USD, USDT/USD, USDC/USD, USDC/USDT, DAI/USD, PYUSD/USD and the pegged tokens TBTC/BTC and "
+        "WBTC/BTC among them — are on their own schedule: 20 bp for either kind of order under $50k, then 16, 12, 8, 4 and 2 as "
+        "volume rises, 1 bp from $10M. The three USDG pairs cost 0.1 bp to fill immediately and are counted as free here. So a loop "
+        "through BTC or ETH pays three ordinary fees (240 bp at the bottom tier); a loop through USDT, USDC or EUR pays two ordinary "
+        "fees and one stablecoin-or-currency fee (180 bp) — EUR/USD is a currency pair with that pair's own fee, not an ordinary "
+        "one. Kraken's public API still reports the pre-2026 ordinary schedule for each pair (40 bp immediate, 25 resting, at the "
+        "bottom); the website's numbers are used here, so set the ordinary box to 40 if your account is still charged the old "
+        "rate. Latency is snapped to the nearest of 100, 250, 500 and 1000 ms, which is what the recorder keeps. Source: "
+        "https://www.kraken.com/features/fee-schedule"
+    )
+    RENAME = {"XBT": "BTC", "XDG": "DOGE"}  # v1 stream name -> v2 stream name, which is also the everyday name
+    BATCH = 200  # symbols per subscribe message
+
+    def __init__(self):
+        super().__init__()
+        self.zero: frozenset[str] = frozenset()
+        self.reduced: frozenset[str] = frozenset()
+
+    def triangles(self):
+        r = httpx.get("https://api.kraken.com/0/public/AssetPairs", timeout=20).json()
+        if r.get("error"):
+            raise RuntimeError(f"AssetPairs: {r['error']}")
+        pairs: dict[tuple[str, str], dict] = {}
+        for p in r["result"].values():
+            if p.get("status") != "online":
+                continue
+            base, quote = (self.RENAME.get(a, a) for a in p["wsname"].split("/"))
+            pairs[(base, quote)] = p
+        bottom = lambda p: p["fees"][0][1]  # the immediate-fill rate at zero volume, in percent
+        self.zero = frozenset(self.product(*k) for k, p in pairs.items() if bottom(p) <= 0.01)
+        self.reduced = frozenset(self.product(*k) for k, p in pairs.items() if 0.01 < bottom(p) <= 0.2)
+        return sorted((x, q) for x, q in pairs if q in self.bridges and (x, "USD") in pairs and (q, "USD") in pairs)
+
+    def product(self, base, quote):
+        return f"{base}/{quote}"
+
+    def subscribe(self, products):
+        return [{"method": "subscribe", "params": {"channel": "ticker", "symbol": products[i:i + self.BATCH], "event_trigger": "bbo"}}
+                for i in range(0, len(products), self.BATCH)]
+
+    def parse(self, m, books):
+        if m.get("channel") != "ticker":
+            if m.get("method") == "subscribe" and not m.get("success"):
+                log.warning("kraken triangles: %s", m)
+            return None
+        data = m.get("data") or []
+        if len(data) > 1:  # one market per message so far; say so if that ever changes, since only the first is read
+            log.warning("kraken triangles: %d markets in one ticker message", len(data))
+        d = data[0] if data else {}
+        sym = d.get("symbol")
+        if sym not in books:
+            return None
+        bid, ask = float(d.get("bid") or 0), float(d.get("ask") or 0)
+        if bid <= 0 or ask <= 0:  # an empty side
+            return None
+        return sym, (bid, ask, float(d.get("bid_qty") or 0), float(d.get("ask_qty") or 0))
+
+
+VENUES: dict[str, Venue] = {v.key: v for v in (Coinbase(), BinanceUS(), Kraken())}
 
 
 # -- the watcher -----------------------------------------------------------------
@@ -399,52 +497,83 @@ class Watcher:
 def _load(path, cols, col, hours):
     if not path.exists():
         return pd.DataFrame(columns=cols)
-    df = pd.read_csv(path)
+    df = pd.read_csv(path, dtype={"coin": "category", "via": "category"})  # a day of Kraken is 5M rows; categories read and group faster
     return df[df[col] >= (time.time() - hours * 3600) * 1000]
+
+
+def _f(v) -> float | None:
+    """A JSON number, or None where pandas says NaN (no data)."""
+    return None if v is None or pd.isna(v) else float(v)
+
+
+LOOP = ["coin", "via", "dir"]
 
 
 def report(venue: Venue, coin_fee: float, reduced_fee: float, latency_ms: int, hours: float, now: dict | None = None) -> dict:
     """Every loop over the last `hours`: where it stands now, its typical
     and best mismatch, how often and how long it was positive, what was
     left of it after your latency, and what beating your fees would have
-    paid. Sorted by median gross, best first."""
+    paid. Sorted by median gross, best first.
+
+    Each table is aggregated once, grouped by loop, rather than masked
+    per loop: Kraken has 1,300 loops and a day of its samples is five
+    million rows, which made the per-loop way take most of a minute."""
     s = _load(venue.samples_path, SAMPLE_COLS, "ts", hours)
     e = _load(venue.episodes_path, EPISODE_COLS, "start", hours)
     lat = min(LAT_MS, key=lambda l: abs(l - latency_ms))
     alive_h = s["ts"].nunique() * SAMPLE_S / 3600 if len(s) else 0.0
     now = now or {}
+    st: dict[tuple, dict] = {}
+    if len(s):
+        gs = s.groupby(LOOP, sort=False, observed=True)
+        t = gs["gross_bp"].agg(samples="count", median_bp="median", best_bp="max", best_i="idxmax")
+        t["p90_bp"] = gs["gross_bp"].quantile(0.9)
+        t["median_size_usd"] = gs["size_usd"].median()
+        t["best_size_usd"] = s.loc[t["best_i"], "size_usd"].values
+        st = t.to_dict("index")
+    et: dict[tuple, dict] = {}
+    if len(e):
+        e = e.copy()
+        e["dur"] = e["end"] - e["start"]
+        e["after"] = e[f"bp_at_{lat}"]
+        costs = {k: venue.cost_bp(*k, coin_fee, reduced_fee) for k in set(zip(e["coin"], e["via"]))}
+        e["cost"] = [costs[k] for k in zip(e["coin"], e["via"])]
+        e["net"] = (e["after"] - e["cost"]).clip(lower=0) / 1e4 * e["max_size_usd"]
+        e["open_after"] = e["after"] > 0
+        e["beyond"] = e["after"] > e["cost"]
+        ge = e.groupby(LOOP, sort=False, observed=True)
+        t = ge.agg(episodes=("start", "count"), max_bp=("max_bp", "max"), max_i=("max_bp", "idxmax"), dur_sum=("dur", "sum"),
+                   median_ms=("dur", "median"), max_ms=("dur", "max"), share_open=("open_after", "mean"), beyond=("beyond", "sum"),
+                   net=("net", "sum"))
+        t["p90_ms"] = ge["dur"].quantile(0.9)
+        t["max_size_usd"] = e.loc[t["max_i"], "max_size_usd"].values
+        t["median_after"] = e[e["open_after"]].groupby(LOOP, observed=True)["after"].median()  # NaN where none was still positive
+        et = t.to_dict("index")
     rows = []
-    keys = {(r.coin, r.via, r.dir) for r in s[["coin", "via", "dir"]].drop_duplicates().itertuples()} | set(now)
-    for x, q, d in sorted(keys):
-        sg = s[(s["coin"] == x) & (s["via"] == q) & (s["dir"] == d)]
-        g = sg["gross_bp"]
-        ep = e[(e["coin"] == x) & (e["via"] == q) & (e["dir"] == d)]
+    for x, q, d in sorted(set(st) | set(now)):
+        x, q, d = str(x), str(q), int(d)
+        sg, ep, cur = st.get((x, q, d)), et.get((x, q, d)), now.get((x, q, d), {})
         # the largest mismatch: from closed episodes, else (still open, or the feed just started) from the samples
-        if len(ep) and (not len(g) or ep["max_bp"].max() >= g.max()):
-            best_bp, best_size = float(ep["max_bp"].max()), float(ep.loc[ep["max_bp"].idxmax(), "max_size_usd"])
-        elif len(g):
-            best_bp, best_size = float(g.max()), float(sg.loc[g.idxmax(), "size_usd"])
+        if ep and (not sg or ep["max_bp"] >= sg["best_bp"]):
+            best_bp, best_size = _f(ep["max_bp"]), _f(ep["max_size_usd"])
+        elif sg:
+            best_bp, best_size = _f(sg["best_bp"]), _f(sg["best_size_usd"])
         else:
             best_bp = best_size = None
-        dur = ep["end"] - ep["start"]
-        cost = venue.cost_bp(x, q, coin_fee, reduced_fee)
-        after = ep[f"bp_at_{lat}"] if len(ep) else pd.Series(dtype=float)
-        net = ((after - cost).clip(lower=0) / 1e4 * ep["max_size_usd"]) if len(ep) else pd.Series(dtype=float)
-        cur = now.get((x, q, d), {})
         rows.append({
-            "coin": x, "via": q, "dir": d, "route": route(x, q, d), "cost_bp": cost,
+            "coin": x, "via": q, "dir": d, "route": route(x, q, d), "cost_bp": venue.cost_bp(x, q, coin_fee, reduced_fee),
             "now_bp": cur.get("gross"), "now_size_usd": cur.get("size"), "open_since": cur.get("open_since"),
-            "samples": int(len(g)), "median_bp": float(g.median()) if len(g) else None,
-            "p90_bp": float(g.quantile(0.9)) if len(g) else None,
-            "median_size_usd": float(sg["size_usd"].median()) if len(g) else None,
-            "episodes": int(len(ep)), "share_time": float(dur.sum() / (alive_h * 3.6e6)) if alive_h else 0.0,
-            "median_ms": float(dur.median()) if len(ep) else None, "p90_ms": float(dur.quantile(0.9)) if len(ep) else None,
-            "max_ms": float(dur.max()) if len(ep) else None,
+            "samples": int(sg["samples"]) if sg else 0, "median_bp": _f(sg["median_bp"]) if sg else None,
+            "p90_bp": _f(sg["p90_bp"]) if sg else None, "median_size_usd": _f(sg["median_size_usd"]) if sg else None,
+            "episodes": int(ep["episodes"]) if ep else 0,
+            "share_time": float(ep["dur_sum"] / (alive_h * 3.6e6)) if ep and alive_h else 0.0,
+            "median_ms": _f(ep["median_ms"]) if ep else None, "p90_ms": _f(ep["p90_ms"]) if ep else None,
+            "max_ms": _f(ep["max_ms"]) if ep else None,
             "best_bp": best_bp, "best_size_usd": best_size,
-            "share_open_after_latency": float((after > 0).mean()) if len(ep) else 0.0,
-            "median_bp_after_latency": float(after[after > 0].median()) if (after > 0).any() else None,
-            "beyond_cost": int((after > cost).sum()) if len(ep) else 0,
-            "usd_per_day": float(net.sum() / alive_h * 24) if alive_h else 0.0,
+            "share_open_after_latency": float(ep["share_open"]) if ep else 0.0,
+            "median_bp_after_latency": _f(ep["median_after"]) if ep else None,
+            "beyond_cost": int(ep["beyond"]) if ep else 0,
+            "usd_per_day": float(ep["net"] / alive_h * 24) if ep and alive_h else 0.0,
         })
     rows.sort(key=lambda r: -(r["median_bp"] if r["median_bp"] is not None else -1e9))
     return {"venue": venue.key, "venue_name": venue.name, "rows": rows, "alive_h": alive_h, "hours": hours, "latency_ms_used": lat,

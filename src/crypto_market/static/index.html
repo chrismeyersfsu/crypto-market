@@ -47,9 +47,9 @@
 <main>
   <section id="viewCb">
   <h1>Triangles: do an exchange's own three prices ever disagree — for long enough to catch?</h1>
-  <p class="sub">Every coin an exchange lists both in dollars and in a bridge currency (BTC, ETH, USDT, and on Binance.US also USDC) is a triangle: its three prices should agree (<code>X/USD == X/Q × Q/USD</code>). When they don't, three trades in a loop — dollars → coin → bridge → dollars, or the reverse — end with more dollars than they started with, before fees. Nothing leaves the exchange and no second account is involved; the cost is three fees and whatever has moved by the time the orders land. This server watches every one of those markets on the exchange's own feed — Coinbase's full order books, Binance.US's best bid and ask — and re-prices both loops of every triangle each time one of its three markets changes, so the numbers below are what a bot sitting on the same feed would have seen, down to the millisecond. Pick a venue and click Run.</p>
+  <p class="sub">Every coin an exchange lists both in dollars and in a bridge currency (BTC, ETH, USDT, on Binance.US and Kraken also USDC, and on Kraken also the euro, which it lists against the dollar) is a triangle: its three prices should agree (<code>X/USD == X/Q × Q/USD</code>). When they don't, three trades in a loop — dollars → coin → bridge → dollars, or the reverse — end with more dollars than they started with, before fees. Nothing leaves the exchange and no second account is involved; the cost is three fees and whatever has moved by the time the orders land. This server watches every one of those markets on the exchange's own feed — Coinbase's full order books, Binance.US's and Kraken's best bid and ask — and re-prices both loops of every triangle each time one of its three markets changes, so the numbers below are what a bot sitting on the same feed would have seen, down to the millisecond. Pick a venue and click Run.</p>
   <form id="fCb">
-    <label>Venue <select id="cVenue"><option value="coinbase">Coinbase</option><option value="binanceus">Binance.US</option></select></label>
+    <label>Venue <select id="cVenue"><option value="coinbase">Coinbase</option><option value="binanceus">Binance.US</option><option value="kraken">Kraken</option></select></label>
     <label>Fee per fill, ordinary pair (bp) <input type="number" id="cFee" value="60" step="1" min="0" max="200"></label>
     <label><span id="cStableLabel">Fee per fill, stable pair (bp)</span> <input type="number" id="cStable" value="60" step="0.5" min="0" max="200"></label>
     <label>Your latency (ms) <input type="number" id="cLat" value="150" step="10" min="0" max="60000"></label>
@@ -336,6 +336,7 @@ function renderTriangle(d) {
 const C_VENUES = {
   coinbase: { fees: [60, 60], label: "Fee per fill, stable pair (bp)" },
   binanceus: { fees: [2, 1], label: "Fee per fill, Tier 0 pair (bp)" },
+  kraken: { fees: [80, 20], label: "Fee per fill, stablecoin or currency pair (bp)" },
 };
 let cReq = 0, cChart, cPicked = null, cTimer, cShown = null;  // cShown: the venue the table currently on screen came from
 const cParams = () => { const g = id => document.getElementById(id).value; return { venue: g("cVenue"), coin_fee: g("cFee") || 0, stable_fee: g("cStable") || 0, latency_ms: g("cLat") || 0, hours: g("cHours") || 24 }; };

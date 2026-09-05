@@ -44,6 +44,29 @@ on every pair, BTC and stablecoin pairs included, with one "Tier 0" pair
 (BNB/USD) at 1 bp, so a loop costs 6 bp -- a far lower bar than
 Coinbase's, and the reason it is worth watching.
 
+Kraken is the third venue. Its bridges are BTC, ETH, USDT, USDC and
+the euro: Kraken lists EUR/USD as a market of its own and most of its
+coins in euros as well as dollars, so a coin priced in both is a
+triangle through EUR/USD, and that is where most of Kraken's ~660
+triangles (1,200 markets) come from. Listings come from the REST
+`AssetPairs` call, with Kraken's own names (XBT, XDG) turned into the
+everyday ones (BTC, DOGE), which is also what its v2 stream wants.
+Prices come from one WebSocket v2 connection on the `ticker` channel,
+told to push on every change of the best bid or ask rather than only on
+trades; it sends a snapshot of every market on subscribe, so nothing is
+seeded, but the subscribe has to go out in batches of a couple of
+hundred symbols or Kraken closes the connection. Files are
+`krtri_samples.csv` and `krtri_episodes.csv`. Fees, read from
+kraken.com/features/fee-schedule on 2026-09-05: 80 bp for an immediate
+fill on an ordinary pair at the bottom tier (40 to rest an order),
+falling to 10 bp at $10M a month, and 20 bp on the stablecoin and
+currency pairs -- EUR/USD, USDT/USD, USDC/USD and the like -- so a loop
+through BTC or ETH costs 240 bp and one through EUR, USDT or USDC 180
+bp; which pairs sit on which schedule is read off `AssetPairs`, which
+carries a fee table per pair. Kraken's API still reports the older 40 bp
+bottom tier for ordinary pairs; the website's number is the default and
+the box takes either.
+
 ## Across exchanges (under "Everything else")
 
 Markets: BTC/USD, ETH/USD, BTC/USDT, and the stablecoins against the dollar
