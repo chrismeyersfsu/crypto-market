@@ -7,8 +7,9 @@ written after the run (2026-09-05) and shown on the page next to the table.
 READINGS = {
     "trend": "Slow trend rules on one coin (price above its 168-bar average, a 96/192 crossover, at 4 hours) kept "
              "most of their result when acted on a bar late and beat holding ETH in the held-back part (55-59% vs 38%), "
-             "but ETH was the best of three coins and the held-back window is one 5-month rally; on daily bars over "
-             "five years the same rules mostly just sat out the falling stretches (+5% a year median vs -23% holding). "
+             "but ETH was the best of three coins and the held-back window is one 5-month rally. On Binance.US daily "
+             "bars the same rules are a wash: -1% a year median vs -12% holding in the held-back part, which is "
+             "2025-02 to 2026-09 because Binance.US's daily history has a hole from 2023-07 to 2025-02 that is skipped. "
              "Holding the 3-10 coins that rose most over the past week or month lost 80-99% out of sample in every variant.",
     "reversion": "Buying dips (z-score, bands, RSI) beat holding the coin in under 10% of variants and made 7-8% a year "
                  "while the coin made 96%. The one rule that looked right, buy after a -2% hour on ETH, flips from +14% "
@@ -29,4 +30,15 @@ READINGS = {
               "part; in-sample and held-back Sharpe flip sign on the same rules (US hours: -1.2 then +2.0). Picking the "
               "best 4 hours of the day costs 50% a year in fees at Binance.US and everything at Coinbase.",
     "recheck": "The rules that looked best, acted on one bar late. The slow trend rules keep their result; the dip rule loses it.",
+    "playbook": "The spot half of Pavel Kycek's Algorithmic Crypto Playbook, from his public descriptions of it: simple rules "
+                "on a basket of coins with a cap per coin, at daily, 12-hour and 4-hour bars, the rule types combined. On "
+                "15 Coinbase-priced coins at daily bars since 2021, equal money in the in-sample-best of each rule type "
+                "(above the 50-day average, a 10/50 crossover, a 20-day breakout, an RSI-14 dip) made 30% a year in the "
+                "held-back part (Sharpe 0.9, worst dip -33%) while holding the same coins made -1% and BTC -8%; acted a "
+                "day late it made 26%; by year +37, -17, +76, +57, +50, +1, against a basket that lost 74% in 2022. "
+                "Three things count against it. The neighbours fail: the 100- and 200-day averages and the three other "
+                "crossovers lose money, and all 44 variants averaged make -1%, so the result rests on picks, not on a "
+                "family that works. The 12-hour and 4-hour versions make 1-3% a year held back against 28% for holding. "
+                "And the universe is the coins that survived to 2026, which the author himself says flatters this kind "
+                "of test several times over. No short selling and no futures here, so half of what he runs is missing.",
 }

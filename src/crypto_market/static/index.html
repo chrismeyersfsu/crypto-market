@@ -539,7 +539,7 @@ async function runSearch() {
   const both = beat.filter(x => x.is_sharpe > 0.5 && x.oos_sharpe > 0.5);
   const tried = d.rows.reduce((a, x) => a + (x.variants_tried || 0), 0);
   document.getElementById("sVerdict").innerHTML =
-    `<b>${d.rows.length}</b> recorded variants across ${d.families.length} families. <b>${beat.length}</b> beat simply holding the coin in the held-back part after costs, <b>${both.length}</b> of those were also decent in the first part (Sharpe above 0.5 in both) — and each of those is a best-of-many pick from a family that tried dozens, on one year that fell then rallied. Nothing here is a strategy to run money on; the readings below say why, family by family.`;
+    `<b>${d.rows.length}</b> recorded variants across ${d.families.length} families. <b>${beat.length}</b> beat simply holding the coin in the held-back part after costs, <b>${both.length}</b> of those were also decent in the first part (Sharpe above 0.5 in both) — and each of those is a best-of-many pick from a family that tried dozens, on one year that fell then rallied, or on the playbook basket, whose neighbouring settings lose. Nothing here is a strategy to run money on; the readings below say why, family by family.`;
   document.getElementById("sReadings").innerHTML = Object.entries(d.readings || {}).filter(([f]) => d.families.includes(f)).map(([f, t]) => `<li><b>${f}</b>: ${t}</li>`).join("");
   st.textContent = d.ran ? `Ran ${new Date(d.ran * 1000).toLocaleString()}. Held back: last ${Math.round(d.oos_share * 100)}% of bars. Fee per immediate fill: Binance.US ${d.fee_bp.binanceus} bp, Coinbase ${d.fee_bp.coinbase} bp, plus half the spread.` : "";
   renderSearch();

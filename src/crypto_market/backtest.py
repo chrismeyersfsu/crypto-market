@@ -41,15 +41,36 @@ HALF_SPREAD_BP = {
     "coinbase": {"BTC-USD": 0.1, "BTC-USDT": 1.5, "ETH-USD": 0.25, "ETH-BTC": 1.0, "SOL-USD": 1.0,
                  "USDT-USD": 0.1, "USDC-USD": 0.1, "*": 3.0},
 }
-BARS_PER_YEAR = {"1m": 525_600, "5m": 105_120, "15m": 35_040, "1h": 8_760, "4h": 2_190, "1d": 365}
+STEP = {"1m": "1min", "5m": "5min", "15m": "15min", "1h": "1h", "4h": "4h", "12h": "12h", "1d": "1D"}
+BARS_PER_YEAR = {"1m": 525_600, "5m": 105_120, "15m": 35_040, "1h": 8_760, "4h": 2_190, "12h": 730, "1d": 365}
 
 
 def candles(exchange, symbol, interval):
-    """Candles as a DataFrame indexed by UTC time: open high low close volume trades taker_buy_volume."""
+    """Candles as a DataFrame indexed by UTC time: open high low close volume trades taker_buy_volume.
+
+    Bars the exchange has no candle for are present as blank rows, so a hole
+    in the history (Binance.US has none from 2023-07-14 to 2025-02-19) is a
+    stretch of no data, not one enormous bar; a rule's rolling window and the
+    return across it come out NaN, and `score` skips those bars.
+    """
     p = HIST_DIR / f"{exchange}_{symbol.lower()}_{interval}.csv"
     df = pd.read_csv(p)
     df.index = pd.to_datetime(df.ts, unit="ms", utc=True)
-    return df.drop(columns="ts")
+    df = df.drop(columns="ts")
+    df = df[~df.index.duplicated()].sort_index()
+    step = STEP.get(interval)
+    if step is not None and len(df) > 1:
+        df = df.reindex(pd.date_range(df.index[0], df.index[-1], freq=step))
+    return df
+
+
+def holes(df, interval=None):
+    """(start, end) of every stretch of blank bars in a candles frame."""
+    missing = df.close.isna()
+    if not missing.any():
+        return []
+    grp = (missing != missing.shift()).cumsum()
+    return [(str(g.index[0])[:16], str(g.index[-1])[:16]) for _, g in missing[missing].groupby(grp[missing])]
 
 
 def available(exchange=None, interval=None):
@@ -116,11 +137,12 @@ def score(df, weight, exchange, market, interval=None, fee_bp=None, maker=False,
     if late:
         w = w.shift(late).fillna(0.0)
     px = df[price]
-    bar_ret = px.pct_change().shift(-1)  # return earned over the bar after the decision
+    w = w.where(px.notna(), 0.0)  # nothing can be held through a hole in the data
+    bar_ret = px.pct_change().shift(-1)  # return earned over the bar after the decision (NaN at a hole: skipped)
     held = w.shift(1).fillna(0.0)  # the position that was held during this bar
     turn = (w - held).abs()  # what changed at this bar's close
     c = cost_bp(exchange, market, fee_bp, maker) / 1e4
-    strat = (w * bar_ret - turn * c).to_numpy()
+    strat = (w * bar_ret - turn * c).where(bar_ret.notna()).to_numpy()
     strat = strat[:-1]  # the last bar's forward return is unknown
     bh = bar_ret.to_numpy()[:-1]
     ins, oos = split(df.index[:-1])
@@ -128,6 +150,7 @@ def score(df, weight, exchange, market, interval=None, fee_bp=None, maker=False,
     b_in, b_out = _stats(bh[ins], bpy), _stats(bh[oos], bpy)
     trades = int((turn > 1e-9).sum())
     gross_bp = (w * bar_ret).sum() * 1e4
+    interval_holes = holes(df)
     return {
         "exchange": exchange, "market": market, "interval": interval,
         "fee_bp": FEE_BP[exchange] if fee_bp is None else fee_bp, "cost_bp": round(c * 1e4, 2),
@@ -140,6 +163,7 @@ def score(df, weight, exchange, market, interval=None, fee_bp=None, maker=False,
         "bh_is_ann_pct": b_in["ann_pct"], "bh_oos_ann_pct": b_out["ann_pct"],
         "is_from": str(df.index[0])[:16], "oos_from": str(df.index[:-1][oos][0])[:16] if oos.any() else "", "to": str(df.index[-1])[:16],
         "late": int(late),
+        "note": f"{len(interval_holes)} hole(s) in the data skipped: " + ", ".join(f"{a} to {b}" for a, b in interval_holes[:3]) if interval_holes else "",
     }
 
 
@@ -167,7 +191,7 @@ def score_returns(ret, index, interval, exchange, market, trades, bh=None, note=
 
 def _interval_of(index):
     step = pd.Series(index).diff().median()
-    return {60: "1m", 300: "5m", 900: "15m", 3600: "1h", 14400: "4h", 86400: "1d"}[int(step.total_seconds())]
+    return {60: "1m", 300: "5m", 900: "15m", 3600: "1h", 14400: "4h", 43200: "12h", 86400: "1d"}[int(step.total_seconds())]
 
 
 COLUMNS = ["family", "strategy", "params", "exchange", "market", "interval", "fee_bp", "cost_bp", "maker",

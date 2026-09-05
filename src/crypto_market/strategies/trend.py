@@ -201,9 +201,13 @@ def _run_account(tgt, close, cost):
     net = np.empty(n - 1)
     turnover = 0.0
     trades = 0
+    listed = ~np.isnan(px)
+    last_bar = np.where(listed.any(axis=0), n - 1 - np.argmax(listed[::-1], axis=0), -1)  # each coin's last priced bar
     for t in range(n - 1):
         charge = 0.0
-        gone = np.isnan(px[t]) & (held > 0)  # stopped trading: it has to go
+        # a coin with no price for the rest of the series has stopped trading and has to go; a blank
+        # bar with prices after it is a hole in the data, held through at no return
+        gone = (t > last_bar) & (held > 0)
         if gone.any():
             charge += float((held[gone] * c[gone]).sum())
             turnover += float(held[gone].sum())
@@ -211,7 +215,11 @@ def _run_account(tgt, close, cost):
             held = np.where(gone, 0.0, held)
         row = tg[t]
         if not np.isnan(row).all():
-            want = np.nan_to_num(row)
+            want = np.where(np.isnan(row), held, row)  # a NaN coin on a rebalance bar is left as it is
+            if want.sum() > 1.0 + 1e-9:  # what is bought has to come out of cash: scale the buys down
+                touched = ~np.isnan(row)
+                room = 1.0 - want[~touched].sum()
+                want[touched] *= max(room, 0.0) / want[touched].sum()
             change = np.abs(want - held)
             charge += float((change * c).sum())
             turnover += float(change.sum())

@@ -165,6 +165,30 @@ variants; `uv run python -m crypto_market.strategies.<family>` re-runs
 one. The page shows them all under "Strategy search", with each family's
 reading.
 
+Binance.US's own history has a hole: its API returns no daily, hourly or
+minute candles between 2023-07-14 and 2025-02-19. `candles()` leaves
+blank rows where data is missing instead of joining the two ends into one
+bar, and `score()` skips them, so a held position rides through a hole
+without a return and without a trade; each row's note says how many holes
+it skipped. Coinbase's daily history is complete since 2021 and is used
+where a long daily series matters.
+
+`strategies/playbook.py` is the spot version of the approach in Pavel
+Kycek's *The Algorithmic Crypto Playbook* (2025), from his public
+descriptions of it (the book itself is not on hand): a basket of coins
+with a cap per coin, at daily, 12-hour and 4-hour bars; long-term
+momentum (price above its N-day average), moving-average crossovers, RSI
+dips and breakouts, 44 variants; the in-sample-best of each rule type
+combined with equal money, and all 44 combined with nothing picked; every
+coin equally and BTC as yardsticks; the combination acted on one bar late;
+year-by-year results in the note. The daily basket is the 15 Binance.US
+USD coins with a median $100k a day that Coinbase lists, at Coinbase's
+prices and Binance.US's costs; the 12-hour and 4-hour baskets are the 7
+that trade in most hours. He also trades futures and bets on falls, which
+spot cannot, so this is half of what he runs; and the coins on disk are
+the ones that survived to 2026, which he says flatters this kind of test
+several times over.
+
 ## Findings so far
 
 Across exchanges. BTC: the Coinbase/Bitstamp gap is real but small, about
@@ -225,8 +249,28 @@ past week or month lost 80-99% out of sample in every variant. What is
 left is the slow trend rules: on ETH at 4-hour bars, "price above its
 168-bar average" and a 96/192 crossover beat holding in the held-back
 five months (59% and 55% a year vs 38%, acted one bar late, 21-93
-trades), and on daily bars over five years the same shape of rule mostly
-sits out the falling stretches (+5% a year median vs -23% holding, on a
-window that is one bear market). That is a well-known effect, ETH is the
-best of three coins tried, and one rally is one sample; it is the only
-thing here worth a second look, and it is not a business.
+trades); on Binance.US daily bars, with the 2023-2025 hole skipped, the
+same shape of rule is a wash (-1% a year median vs -12% holding). That is
+a well-known effect, ETH is the best of three coins tried, and one rally
+is one sample; it is the only thing here worth a second look, and it is
+not a business.
+
+The playbook. The one strategy that came out of a book rather than a
+guess does better than anything above, and for the reason the book gives:
+a basket instead of one coin, and rule types combined. On 15 coins at
+daily bars since 2021, equal money in the in-sample-best of each rule
+type (above the 50-day average, a 10/50 crossover, a 20-day breakout, an
+RSI-14 dip, each coin capped at 10%) made 30% a year in the held-back
+2025-02 to 2026-09 (Sharpe 0.9, worst dip -33%) while holding the same
+coins made -1% and BTC -8%; acted a day late it made 26%; by year +37,
+-17, +76, +57, +50, +1, against a basket that lost 74% in 2022 -- it
+earns its keep by being in cash when coins fall, and lags the basket in
+the years they rise. Against it: the neighbouring settings lose money
+(100- and 200-day averages, the other three crossovers), and all 44
+variants averaged make -1%, so the result rests on the picks; the
+12-hour and 4-hour versions make 1-3% a year held back against 28% for
+holding; the held-back window is one period; and the coins are the
+survivors. The author's own tests for a rule worth running are
+neighbours that also work and results that survive removing the coins
+that did best; this passes the one-bar-late test and fails the
+neighbours test.
