@@ -9,7 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 
-from . import cbtri, crossex, resting
+from . import backtest, cbtri, crossex, resting, strategies
 
 
 @asynccontextmanager
@@ -157,6 +157,17 @@ def resting_curve(strategy: str = Query(..., max_length=80)):
     for rule, g in c.groupby("rule"):
         out[rule] = {"t": (g.ts // 1000).tolist(), "pnl": g.pnl_usd.tolist()}
     return {"strategy": strategy, "rules": out}
+
+
+@app.get("/api/strategies")
+def strategy_search():
+    """Every strategy family's results (see backtest.py and strategies/), best out-of-sample first."""
+    df = backtest.results()
+    rows = [{k: _clean(v) for k, v in r.items()} for r in df.to_dict("records")]
+    files = sorted(backtest.RESULTS_DIR.glob("*.csv")) if backtest.RESULTS_DIR.exists() else []
+    return {"rows": rows, "oos_share": backtest.OOS, "fee_bp": backtest.FEE_BP,
+            "ran": int(max((f.stat().st_mtime for f in files), default=0)),
+            "families": [f.stem for f in files], "readings": strategies.READINGS}
 
 
 @app.get("/api/markets")

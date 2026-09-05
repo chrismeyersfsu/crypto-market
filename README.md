@@ -133,6 +133,38 @@ position may drift $500 either way, orders take 200 ms to arrive.
 `uv run python -m crypto_market.resting` writes `resting_results.csv` and
 the profit curves; the page shows them under "Resting orders".
 
+## Strategy search
+
+A wider net than triangles. `history.py` pulls candles (`data/hist/`,
+resumable, `--workers`): Binance.US 1-minute for a year on eight markets,
+hourly since 2025-02 and daily since 2021 for every USD market it lists;
+Coinbase 1-minute on five, hourly and daily on the forty biggest. One
+harness, `backtest.py`, scores every idea the same way: a strategy is the
+share of the account to hold in the coin, decided at each bar's close and
+held over the next bar, so it can only use what it could have known; spot
+only, nothing sold that isn't held; every change of position pays the fee
+plus half the bid-ask spread measured by this server's tick recorder; the
+last 30% of the bars is held back and parameters are chosen on the first
+70% only; buy-and-hold over the same bars is reported beside every row.
+`score(..., late=1)` acts on each decision one bar later than the rule
+says, the test that separates a signal from a fill-timing artifact.
+
+Six families, each a module under `strategies/` writing
+`data/strategies/<family>.csv`: trend (averages, crossovers, breakouts,
+past-return rules on one coin; holding the coins that rose most across
+the whole Binance.US list), reversion (dips by z-score, bands and RSI, one
+big down bar, stablecoins off their peg), crossex (Coinbase's last minute
+predicting Binance.US's next; Binance.US below Coinbase; the same on the
+trade tape), flow (buyer-aggressor share, volume and trade-count spikes,
+imbalance and big prints from the tape), pairs (switching between ETH,
+BTC and SOL by which is cheap or which rose; pairs hunted by how fast
+their spread reverts; USDT vs USDC), timing (hour of day, weekday, US
+hours, weekends, volatility regimes and targeting, range squeezes), plus
+recheck, the best rules acted on one bar late. About 1,600 recorded
+variants; `uv run python -m crypto_market.strategies.<family>` re-runs
+one. The page shows them all under "Strategy search", with each family's
+reading.
+
 ## Findings so far
 
 Across exchanges. BTC: the Coinbase/Bitstamp gap is real but small, about
@@ -168,3 +200,33 @@ one, with a $2.50 drawdown; USDC/USD and USDC/USDT trade too little to
 matter (a few thousand trades a month) and came out within a dollar of
 zero. The USDT figure would also have been about 6% of that market's
 volume, which the market would notice.
+
+Strategy search. Over the year to September 2026 (hourly bars since
+February 2025, daily since 2021), the single most useful result is a
+warning: Binance.US's minute and hour bars are stale. BTC/USD has no
+trade in 56% of minutes, ETH/USD 72%, so a bar's close is often the last
+price carried forward, and any rule that buys "the dip" or "the cheaper
+exchange" or "the cheap coin of a pair" is buying a print the next trade
+corrects. That one effect produced every spectacular number: Coinbase's
+last minute "predicting" Binance.US's next (correlation 0.22, which is
+0.30 on minutes with no trades and -0.05 on busy ones), ETH-vs-BTC
+switching at +60% a year (-38% acted on one bar late; +5% on the ETHBTC
+market's own prices), pairs among thin coins at millions of percent a
+year, and the "buy after a -2% hour" rule (+14% a year held back, -6% one
+bar late). On the actual trade tape the cross-exchange edge is 0.5-1.8 bp
+a round trip against 4.6 bp of cost, and aggressive buying predicts the
+next minute by 0.7-2.9 bp, real but half the cost of acting on it.
+Stablecoins stopped leaving their peg in April 2026, so the peg trade has
+no held-back sample. Every clock, weekday and volatility rule that beat
+holding did so by being out of the market during the falling first part
+of the year and lagged holding during the rally; the fitted ones flip
+sign between the two parts. Holding the coins that rose most over the
+past week or month lost 80-99% out of sample in every variant. What is
+left is the slow trend rules: on ETH at 4-hour bars, "price above its
+168-bar average" and a 96/192 crossover beat holding in the held-back
+five months (59% and 55% a year vs 38%, acted one bar late, 21-93
+trades), and on daily bars over five years the same shape of rule mostly
+sits out the falling stretches (+5% a year median vs -23% holding, on a
+window that is one bear market). That is a well-known effect, ETH is the
+best of three coins tried, and one rally is one sample; it is the only
+thing here worth a second look, and it is not a business.
