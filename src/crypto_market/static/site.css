@@ -1,0 +1,44 @@
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,.10);
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --good: #006300; --bad: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) { :root {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #fff; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,.10);
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --good: #0ca30c; --bad: #e66767;
+  } }
+  * { box-sizing: border-box }
+  body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px }
+  h1 { font-size: 20px; margin: 0 0 4px } .sub { color: var(--ink-2); margin: 0 0 16px }
+  form { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: end; margin-bottom: 16px }
+  label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--ink-2) }
+  input, select, button { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px }
+  input[type=number] { width: 7em } input[type=date] { width: 11em }
+  button { cursor: pointer } button.primary { background: var(--s1); color: #fff; border-color: transparent }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px }
+  .card h2 { font-size: 14px; margin: 0 0 2px } .card .hint { color: var(--muted); font-size: 12px; margin: 0 0 10px }
+  .chart { position: relative; height: 340px } .chart.short { height: 220px }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--ink-2); margin-bottom: 8px }
+  .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; background: var(--c) }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums }
+  th, td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--grid) } th:first-child, td:first-child { text-align: left }
+  th { color: var(--muted); font-weight: 500; font-size: 12px }
+  .pos { color: var(--good) } .neg { color: var(--bad) }
+  .verdict { font-size: 15px; margin: 0 0 6px } .verdict b { font-weight: 600 }
+  .err { color: var(--bad) }
+  tr.pick { cursor: pointer } tr.pick:hover td { background: var(--grid) } tr.picked td { font-weight: 600 }
+  details > summary { cursor: pointer; font-size: 16px; font-weight: 600; margin: 24px 0 8px }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px }
+  .tile { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px } .tile .k { font-size: 12px; color: var(--muted) } .tile .v { font-size: 22px; font-weight: 600 }
+  .nav { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 13px; margin: 0 0 18px; padding-bottom: 10px; border-bottom: 1px solid var(--border) }
+  .nav a { color: var(--ink-2); text-decoration: none } .nav a:hover { color: var(--ink) } .nav a[aria-current] { color: var(--ink); font-weight: 600 }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 14px; margin: 18px 0 }
+  a.card { display: block; color: inherit; text-decoration: none } a.card:hover { border-color: var(--s1) }
+  a.card h2 { font-size: 16px; margin: 0 0 6px } a.card .q { color: var(--ink-2); margin: 0 0 10px } a.card .finding { margin: 0 }
+  .finding b { font-weight: 600 }
+  .foot { color: var(--muted); font-size: 12px; margin-top: 24px }
+  .foot a { color: inherit }

@@ -1,13 +1,14 @@
 """FastAPI: one page, one JSON endpoint."""
 from __future__ import annotations
 
+import hashlib
 import math
 from itertools import combinations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 from . import backtest, cbtri, crossex, resting, strategies
 
@@ -40,9 +41,39 @@ def _clean(v):
     return v
 
 
+PAGES = {"triangles", "crossex", "resting", "search"}
+ASSETS = {"site.css", "site.js"}
+
+
+def _asset_tag():
+    """Short hash of the shared css+js, put in their URLs so a change is a new URL."""
+    h = hashlib.sha1()
+    for a in sorted(ASSETS):
+        h.update((STATIC / a).read_bytes())
+    return h.hexdigest()[:10]
+
+
+def _page(name):
+    html = (STATIC / f"{name}.html").read_text()
+    tag = _asset_tag()
+    html = html.replace('href="/site.css"', f'href="/site.css?v={tag}"').replace('src="/site.js"', f'src="/site.js?v={tag}"')
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
+
+
 @app.get("/")
 def index():
-    return FileResponse(STATIC / "index.html")
+    return _page("index")
+
+
+@app.get("/{name}")
+def page(name: str):
+    if name in PAGES:
+        return _page(name)
+    if name in ASSETS:
+        # Cloudflare caches .js/.css for hours by default; the pages link them with a content hash, so a
+        # change is a new URL, and the copy at any one URL never changes
+        return FileResponse(STATIC / name, headers={"Cache-Control": "public, max-age=31536000, immutable"})
+    raise HTTPException(404)
 
 
 @app.get("/api/crossex")

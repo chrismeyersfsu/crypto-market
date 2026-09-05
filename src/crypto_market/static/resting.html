@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Resting orders on Binance.US</title>
+<link rel="stylesheet" href="/site.css">
+</head>
+<body>
+<main>
+<nav class="nav"><a href="/">All analyses</a><a href="/triangles">Triangles</a><a href="/crossex">Across exchanges</a><a href="/resting" aria-current="page">Resting orders</a><a href="/search">Strategy search</a></nav>
+<h1>Resting orders on Binance.US: twenty strategies replayed against a month of real trades</h1>
+  <section id="viewRest">
+  <p class="sub">Binance.US charges nothing for an order that rests on the book and is filled by someone else's trade (2 bp when you fill someone else's). A resting order only fills when somebody trades at your price, so the honest test is to replay every trade that actually happened and ask, for each one, whether it would have filled an order you had sitting there. Two fill rules bracket the truth: <b>through</b> — a trade printed at a price beyond yours, so your whole price level was eaten and you were filled whatever your place in the queue (the pessimistic rule and the one to believe); <b>touch</b> — a trade at exactly your price fills you up to its size, as if you were first in line (optimistic). Orders are $100, the coin held may drift $500 either way from where it started, and an order takes 200 ms to arrive. Profit counts what is held at the end at the current price.</p>
+
+  <div class="card">
+    <p class="verdict" id="rVerdict"></p>
+    <p class="hint" id="rStatus"></p>
+  </div>
+
+  <div class="card">
+    <h2>Every strategy, best first (through rule)</h2>
+    <p class="hint">"Fills" is how many resting orders were filled; "immediate" is fills you paid 2 bp for (closing a position at once, or the other two sides of the triangle). "Held" is the share of the month with a position open. "Drawdown" is the largest drop from the best point so far. Click a row to see its profit over the month under both rules.</p>
+    <div style="overflow-x:auto"><table id="rTable"></table></div>
+  </div>
+
+  <div class="card">
+    <h2 id="rDetailTitle">One strategy over the month</h2>
+    <p class="hint" id="rDetailHint">Click a row above.</p>
+    <div class="chart"><canvas id="rChart"></canvas></div>
+  </div>
+  </section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="/site.js"></script>
+<script>
+let rChart, rPicked = null, rRows = null;
+async function runRest() {
+  const st = document.getElementById("rStatus");
+  st.textContent = "Loading…";
+  const r = await fetch("/api/resting");
+  if (!r.ok) { st.textContent = "No backtest on disk yet."; return; }
+  const d = await r.json();
+  const thru = d.rows.filter(x => x.rule === "through").sort((a, b) => b.pnl_usd - a.pnl_usd);
+  const touch = Object.fromEntries(d.rows.filter(x => x.rule === "touch").map(x => [x.strategy, x]));
+  rRows = thru;
+  const days = thru[0]?.days, win = thru.filter(x => x.pnl_usd > 0), winT = thru.filter(x => touch[x.strategy]?.pnl_usd > 0);
+  const best = thru[0];
+  document.getElementById("rVerdict").innerHTML =
+    `Over ${days} days of Binance.US trades, <b>${win.length} of ${thru.length}</b> strategies made money under the through rule` +
+    (win.length ? ` (best: ${best.strategy}, $${best.pnl_usd.toFixed(2)}, about $${best.usd_per_day.toFixed(2)} a day on $${best.capital_usd.toLocaleString()})` : "") +
+    `, and <b>${winT.length}</b> under the optimistic touch rule.`;
+  st.textContent = `Ran ${new Date(d.ran * 1000).toLocaleString()}. Fee for an immediate fill ${d.taker_bp} bp, resting fill 0. Orders $${d.order_usd}, inventory limit ±$${d.cap_usd}, order latency ${d.latency_ms} ms.`;
+  document.getElementById("rTable").innerHTML =
+    `<tr><th>Strategy</th><th>Profit, through</th><th>Profit, touch</th><th>$ / day</th><th>% / year on capital</th><th>Fills</th><th>Immediate</th><th>Fees paid</th><th>Drawdown</th><th>Held</th></tr>` +
+    thru.map(x => { const t = touch[x.strategy]; return `<tr class="pick${rPicked === x.strategy ? " picked" : ""}" data-k="${x.strategy}"><td title="${x.about.replace(/"/g, "&quot;")}">${x.strategy}</td><td class="${signCls(x.pnl_usd)}">$${x.pnl_usd.toFixed(2)}</td><td class="${signCls(t?.pnl_usd)}">${t ? "$" + t.pnl_usd.toFixed(2) : "–"}</td><td class="${signCls(x.usd_per_day)}">${x.usd_per_day.toFixed(2)}</td><td class="${signCls(x.pct_per_year)}">${x.pct_per_year.toFixed(1)}%</td><td>${x.resting_fills.toLocaleString()}</td><td>${x.immediate_fills.toLocaleString()}</td><td>$${x.fees_usd.toFixed(2)}</td><td>$${x.max_drawdown_usd.toFixed(2)}</td><td>${pct(x.share_time_holding, 0)}</td></tr>`; }).join("");
+  for (const tr of document.querySelectorAll("#rTable tr.pick")) tr.addEventListener("click", () => { rPicked = tr.dataset.k; runRest(); runRestDetail(rPicked); });
+  if (!rPicked && thru.length) { rPicked = thru[0].strategy; runRestDetail(rPicked); }
+}
+async function runRestDetail(k) {
+  const r = await fetch("/api/resting/curve?" + new URLSearchParams({ strategy: k }));
+  if (!r.ok || rPicked !== k) return;
+  const d = await r.json(), row = rRows.find(x => x.strategy === k);
+  document.getElementById("rDetailTitle").textContent = k;
+  document.getElementById("rDetailHint").textContent = row ? row.about + " Markets: " + row.market.replace("+", ", ") + "." : "";
+  const t = d.rules.through.t.map(x => new Date(x * 1000)), th = d.rules.through.pnl, to = d.rules.touch?.pnl || [];
+  rChart?.destroy();
+  rChart = new Chart(document.getElementById("rChart"), {
+    type: "line",
+    data: { labels: t, datasets: [
+      { label: "Through rule", data: th, borderColor: css("--s1"), borderWidth: 1.5, pointRadius: 0 },
+      { label: "Touch rule", data: to, borderColor: css("--s2"), borderWidth: 1.5, pointRadius: 0 },
+      { label: "Zero", data: th.map(() => 0), borderColor: css("--axis"), borderWidth: 1, pointRadius: 0 },
+    ] },
+    options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
+      plugins: { legend: { display: true }, tooltip: { callbacks: { title: i => t[i[0].dataIndex].toLocaleString(), label: c => c.datasetIndex < 2 ? ` ${c.dataset.label}: $${c.parsed.y.toFixed(2)}` : null } } },
+      scales: { x: { ticks: { maxTicksLimit: 8, maxRotation: 0, callback: (v, i) => t[i].toLocaleDateString([], { month: "short", day: "numeric" }) }, grid: { display: false } },
+                y: { ticks: { callback: v => "$" + v, maxTicksLimit: 7 }, grid: { color: css("--grid") } } } }
+  });
+}
+runRest();
+</script>
+</body>
+</html>

@@ -7,7 +7,12 @@ exchange than another?
     uv sync
     uv run crypto-market        # http://127.0.0.1:8870
 
-## Triangles on one exchange (the main page)
+The landing page is one card per analysis, each with its question and its
+one-line finding; the analyses are separate pages, `/triangles`,
+`/crossex`, `/resting` and `/search`, sharing `static/site.css` and
+`static/site.js`.
+
+## Triangles on one exchange (`/triangles`)
 
 Every coin Coinbase lists both in dollars and in a bridge currency (BTC,
 ETH or USDT) that is itself listed in dollars is a triangle -- about fifty
@@ -67,7 +72,7 @@ carries a fee table per pair. Kraken's API still reports the older 40 bp
 bottom tier for ordinary pairs; the website's number is the default and
 the box takes either.
 
-## Across exchanges (under "Everything else")
+## Across exchanges (`/crossex`)
 
 Markets: BTC/USD, ETH/USD, BTC/USDT, and the stablecoins against the dollar
 and each other (USDT/USD, USDC/USD, USDC/USDT). The stablecoins are the
@@ -101,14 +106,14 @@ supply. Collector downtime is detected from the union of all markets'
 ticks, so a stablecoin quote sitting unchanged for minutes is not mistaken
 for an outage.
 
-## The BTC/USDT/USD triangle on the other venues
+## The BTC/USDT/USD triangle on the other venues (bottom of `/crossex`)
 
 The same check for the one triangle every venue has: 30 days of minute
 closes, and live from the recorded bids and asks, which is the honest one
 -- the minute-close version reports "gaps" on thin BTC/USDT markets that
 are just stale prints.
 
-## Resting orders on Binance.US
+## Resting orders on Binance.US (`/resting`)
 
 Binance.US charges nothing for an order that rests on the book and is
 filled by somebody else's trade, so the loops above could in principle be
@@ -131,9 +136,9 @@ until the other side fills, or closed at once, or closed after a 60 s or
 finishing the triangle with two immediate fills. Orders are $100, the
 position may drift $500 either way, orders take 200 ms to arrive.
 `uv run python -m crypto_market.resting` writes `resting_results.csv` and
-the profit curves; the page shows them under "Resting orders".
+the profit curves; `/resting` shows them.
 
-## Strategy search
+## Strategy search (`/search`)
 
 A wider net than triangles. `history.py` pulls candles (`data/hist/`,
 resumable, `--workers`): Binance.US 1-minute for a year on eight markets,
@@ -162,8 +167,7 @@ their spread reverts; USDT vs USDC), timing (hour of day, weekday, US
 hours, weekends, volatility regimes and targeting, range squeezes), plus
 recheck, the best rules acted on one bar late. About 1,600 recorded
 variants; `uv run python -m crypto_market.strategies.<family>` re-runs
-one. The page shows them all under "Strategy search", with each family's
-reading.
+one. `/search` shows them all, with each family's reading.
 
 Binance.US's own history has a hole: its API returns no daily, hourly or
 minute candles between 2023-07-14 and 2025-02-19. `candles()` leaves

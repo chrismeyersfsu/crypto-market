@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Strategy search</title>
+<link rel="stylesheet" href="/site.css">
+</head>
+<body>
+<main>
+<nav class="nav"><a href="/">All analyses</a><a href="/triangles">Triangles</a><a href="/crossex">Across exchanges</a><a href="/resting">Resting orders</a><a href="/search" aria-current="page">Strategy search</a></nav>
+<h1>Strategy search: every idea tried, with real costs and a held-back part</h1>
+  <section id="viewSearch">
+  <p class="sub">A wider net than triangles: trend-following, short-term reversion, one exchange leading another, order flow, pairs of coins that move together, and timing by hour, day and volatility — each family run over a year or more of candles (Binance.US and Coinbase, 1-minute to daily; 100+ Binance.US markets hourly) and 30 days of every Binance.US trade. One harness scores them all: the rule decided at a bar's close is held over the next bar (so it can only use what it could have known), every change of position pays the fee plus half the bid–ask spread, nothing is sold that isn't held, and the last 30% of the bars is held back — parameters were chosen on the first 70% only, and the held-back part is what to believe. "Buy &amp; hold" is what simply holding the coin returned over the same bars, the bar an idea has to clear.</p>
+
+  <div class="card">
+    <p class="verdict" id="sVerdict"></p>
+    <p class="hint" id="sStatus"></p>
+    <h2>What each family found</h2>
+    <ul id="sReadings"></ul>
+  </div>
+
+  <div class="card">
+    <h2>Every strategy, best held-back result first</h2>
+    <p class="hint">Yearly rates. "In sample" is where the parameters were chosen, so it flatters; "held back" is the honest number. "Tried" is how many parameter combinations that family ran — the best of fifty random tries looks good by luck alone. Hover a name for the family's note.</p>
+    <label class="hint"><input type="checkbox" id="sOnlyOos" checked> only rows positive in the held-back part</label>
+    <label class="hint"><input type="checkbox" id="sSane" checked> hide rows above 300% a year (a stale-print artifact every time; see the readings)</label>
+    <div style="overflow-x:auto"><table id="sTable"></table></div>
+  </div>
+  </section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="/site.js"></script>
+<script>
+let sRows = null;
+function renderSearch() {
+  if (!sRows) return;
+  const only = document.getElementById("sOnlyOos").checked;
+  const sane = document.getElementById("sSane").checked;
+  const rows = sRows.filter(r => (!only || r.oos_ann_pct > 0) && (!sane || (Math.abs(r.oos_ann_pct) <= 300 && Math.abs(r.is_ann_pct) <= 300)));
+  document.getElementById("sTable").innerHTML =
+    `<tr><th>Family</th><th>Strategy</th><th>Market</th><th>Bars</th><th>Trades</th><th>Cost / change</th><th>In sample, % / yr</th><th>Held back, % / yr</th><th>Held back Sharpe</th><th>Held back worst dip</th><th>Buy &amp; hold, held back</th><th>Tried</th></tr>` +
+    rows.map(r => `<tr><td>${r.family}</td><td title="${(r.note || "").replace(/"/g, "&quot;")}">${r.strategy}${r.params && r.params !== "{}" ? ` <span class="hint">${r.params}</span>` : ""}${r.late ? ` <span class="hint">(acted one bar late)</span>` : ""}</td><td>${r.exchange} ${r.market}</td><td>${r.interval}</td><td>${r.trades ?? "–"}</td><td>${r.cost_bp != null ? bp(r.cost_bp) : "–"}</td><td class="${signCls(r.is_ann_pct)}">${num(r.is_ann_pct, 1)}%</td><td class="${signCls(r.oos_ann_pct)}"><b>${num(r.oos_ann_pct, 1)}%</b></td><td class="${signCls(r.oos_sharpe)}">${num(r.oos_sharpe, 2)}</td><td>${num(r.oos_maxdd_pct, 1)}%</td><td class="${signCls(r.bh_oos_ann_pct)}">${r.bh_oos_ann_pct == null ? "–" : num(r.bh_oos_ann_pct, 1) + "%"}</td><td>${r.variants_tried ?? "–"}</td></tr>`).join("");
+}
+async function runSearch() {
+  const st = document.getElementById("sStatus");
+  st.textContent = "Loading…";
+  const r = await fetch("/api/strategies");
+  if (!r.ok) { st.textContent = "No results on disk yet."; return; }
+  const d = await r.json();
+  sRows = d.rows;
+  const sane = d.rows.filter(x => Math.abs(x.oos_ann_pct) <= 300 && Math.abs(x.is_ann_pct) <= 300);
+  const beat = sane.filter(x => x.oos_ann_pct > 0 && (x.bh_oos_ann_pct == null || x.oos_ann_pct > x.bh_oos_ann_pct));
+  const both = beat.filter(x => x.is_sharpe > 0.5 && x.oos_sharpe > 0.5);
+  const tried = d.rows.reduce((a, x) => a + (x.variants_tried || 0), 0);
+  document.getElementById("sVerdict").innerHTML =
+    `<b>${d.rows.length}</b> recorded variants across ${d.families.length} families. <b>${beat.length}</b> beat simply holding the coin in the held-back part after costs, <b>${both.length}</b> of those were also decent in the first part (Sharpe above 0.5 in both) — and each of those is a best-of-many pick from a family that tried dozens, on one year that fell then rallied, or on the playbook basket, whose neighbouring settings lose. Nothing here is a strategy to run money on; the readings below say why, family by family.`;
+  document.getElementById("sReadings").innerHTML = Object.entries(d.readings || {}).filter(([f]) => d.families.includes(f)).map(([f, t]) => `<li><b>${f}</b>: ${t}</li>`).join("");
+  st.textContent = d.ran ? `Ran ${new Date(d.ran * 1000).toLocaleString()}. Held back: last ${Math.round(d.oos_share * 100)}% of bars. Fee per immediate fill: Binance.US ${d.fee_bp.binanceus} bp, Coinbase ${d.fee_bp.coinbase} bp, plus half the spread.` : "";
+  renderSearch();
+}
+document.getElementById("sOnlyOos").addEventListener("change", renderSearch);
+document.getElementById("sSane").addEventListener("change", renderSearch);
+runSearch();
+</script>
+</body>
+</html>
