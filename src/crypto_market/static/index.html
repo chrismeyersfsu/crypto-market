@@ -48,15 +48,15 @@
   <p class="sub">The one fast, small edge that is actually well-defined: buy BTC where it's cheap, sell it where it's dear, at the same moment. Two datasets, two questions. Thirty days of 1-minute bars from three venues (public) say whether a gap <em>exists</em> and whether a "see it this minute, trade it the next" rule makes money after fees. Live best-bid/best-ask ticks, recorded by this server from each venue's public feed since it last started, say how many <em>milliseconds</em> a gap lasts — the number that decides whether a home connection could ever reach it.</p>
 
   <form id="fCrossex">
-    <label>Venue A <select id="xA"><option value="coinbase">Coinbase</option><option value="bitstamp">Bitstamp</option><option value="bitfinex">Bitfinex</option></select></label>
-    <label>Venue B <select id="xB"><option value="coinbase">Coinbase</option><option value="bitstamp" selected>Bitstamp</option><option value="bitfinex">Bitfinex</option></select></label>
+    <label>Venue A <select id="xA"><option value="coinbase">Coinbase</option><option value="bitstamp">Bitstamp</option><option value="bitfinex">Bitfinex</option><option value="binanceus">Binance.US</option></select></label>
+    <label>Venue B <select id="xB"><option value="coinbase">Coinbase</option><option value="bitstamp" selected>Bitstamp</option><option value="bitfinex">Bitfinex</option><option value="binanceus">Binance.US</option></select></label>
     <label>Fee per fill (bp) <input type="number" id="xFee" value="1" step="0.5" min="0" max="100"></label>
     <label>Your latency (ms) <input type="number" id="xLat" value="150" step="10" min="0" max="60000"></label>
     <label>Live window (h) <input type="number" id="xHours" value="24" step="1" min="1" max="48"></label>
     <button class="primary">Run</button>
     <span id="xStatus" class="hint"></span>
   </form>
-  <p class="hint">1 bp = 0.01%. Retail fee tiers for a market order: Coinbase ≈ 60 bp, Bitstamp ≈ 40, Kraken ≈ 40, Bitfinex ≈ 20. Every round trip here pays the fee four times (buy and sell on both venues, then unwind both).</p>
+  <p class="hint">1 bp = 0.01%. Retail fee tiers for a market order: Coinbase ≈ 60 bp, Bitstamp ≈ 40, Kraken ≈ 26, Bitfinex ≈ 20, Binance.US 0 on BTC/USD — but see the "size" column below for what a zero-fee venue's order book actually holds at the best price. Every round trip here pays the fee four times (buy and sell on both venues, then unwind both).</p>
 
   <div class="card">
     <p class="verdict" id="xVerdict"></p>
@@ -65,7 +65,7 @@
 
   <div class="card">
     <h2>Price gap, A over B, last 30 days (1-minute closes)</h2>
-    <p class="hint">Basis points. The steady line is the trailing one-day median: a venue's persistent premium, which you can collect once but not repeatedly. Only the wobble around it is tradeable more than once.</p>
+    <p class="hint">Basis points. The steady line is the trailing one-day median: a venue's persistent premium, which you can collect once but not repeatedly. Only the wobble around it is tradeable more than once. Minute closes can't see the bid–ask spread: on a thin venue (Binance.US's spread runs ≈ 5 bp against Coinbase's ≈ 0.3) much of the wobble is that spread bouncing, which you'd pay rather than collect. The live section below uses real bids and asks and is the one to trust.</p>
     <div class="legend">
       <span style="--c:var(--s1)">Gap</span>
       <span style="--c:var(--s2)">Steady level</span>
@@ -82,7 +82,7 @@
   <div class="card">
     <h2>Live ticks: how long does an executable gap last?</h2>
     <p class="hint" id="xLiveHint"></p>
-    <p class="hint">A moment is "executable" when selling on one venue and buying on the other beats both fees, right now. An episode is an unbroken run of such moments. "Open after latency" is the share of episodes still there when your order could arrive. Rows marked <b>steady</b> are a venue's persistent premium: executable almost continuously, but only once — after that round you hold the wrong asset on each side.</p>
+    <p class="hint">A moment is "executable" when selling on one venue and buying on the other beats both fees, right now. An episode is an unbroken run of such moments. "Open after latency" is the share of episodes still there when your order could arrive. "Size at best price" is the median dollars actually on offer at the two prices (the smaller of the two order books' top levels), and "$ per episode" is the whole edge applied to that size — what one perfect, instant execution would have paid. Rows marked <b>steady</b> are a venue's persistent premium: executable almost continuously, but only once — after that round you hold the wrong asset on each side.</p>
     <div style="overflow-x:auto"><table id="xLive"></table></div>
   </div>
 
@@ -119,18 +119,21 @@ function xParams() {
   const g = id => document.getElementById(id).value;
   return new URLSearchParams({ a: g("xA"), b: g("xB"), fee: g("xFee") || 0, latency_ms: g("xLat") || 0, hours: g("xHours") || 24 });
 }
+let xReq = 0;
 async function runCrossex(e) {
   e && e.preventDefault();
-  const status = document.getElementById("xStatus");
+  const status = document.getElementById("xStatus"), mine = ++xReq;
   status.textContent = "loading…"; status.className = "hint";
   const r = await fetch("/api/crossex?" + xParams());
+  if (mine !== xReq) return;  // a newer run superseded this one; its data must not render under the new labels
   if (!r.ok) { status.textContent = (await r.json()).detail; status.className = "err"; return; }
   renderCrossex(await r.json()); status.textContent = "";
 }
 function renderCrossex(d) {
   const m = d.minutes, fee = +document.getElementById("xFee").value || 0, lat = +document.getElementById("xLat").value || 0;
   const a = document.getElementById("xA").value, b = document.getElementById("xB").value;
-  const cap = s => s[0].toUpperCase() + s.slice(1);
+  const NAMES = { coinbase: "Coinbase", bitstamp: "Bitstamp", bitfinex: "Bitfinex", kraken: "Kraken", binanceus: "Binance.US" };
+  const cap = s => NAMES[s] || s;
   const zeroFee = m.fee_sweep.find(x => x.fee_bp === 0), breakEven = m.fee_sweep.filter(x => x.trades > 0 && x.total_profit_bp > 0).map(x => x.fee_bp);
   const maxOk = breakEven.length ? Math.max(...breakEven) : null;
   document.getElementById("xVerdict").innerHTML =
@@ -178,9 +181,9 @@ function renderCrossex(d) {
     "No live ticks recorded yet — the collector starts with the server; check back in a few minutes.";
   const rows = L.pairs.filter(p => p.episodes > 0 || p.level_bp > 2 * fee);
   document.getElementById("xLive").innerHTML = rows.length ?
-    `<tr><th>Sell on</th><th>Buy on</th><th>Steady level</th><th>Episodes</th><th>Share of time</th><th>Median</th><th>90th pct</th><th>Longest</th><th>Open after ${lat} ms</th><th>Capturable / day</th></tr>` +
+    `<tr><th>Sell on</th><th>Buy on</th><th>Steady level</th><th>Episodes</th><th>Share of time</th><th>Median</th><th>90th pct</th><th>Longest</th><th>Open after ${lat} ms</th><th>Capturable / day</th><th>Size at best price</th><th>$ per episode</th></tr>` +
     rows.map(p => { const steady = p.level_bp > 2 * fee;
-      return `<tr><td>${cap(p.sell_on)}</td><td>${cap(p.buy_on)}</td><td>${bp(p.level_bp)}${steady ? " <b>steady</b>" : ""}</td><td>${p.episodes.toLocaleString()}</td><td>${pct(p.share_time, 1)}</td><td>${ms(p.median_ms)}</td><td>${ms(p.p90_ms)}</td><td>${ms(p.max_ms)}</td><td>${pct(p.share_open_after_latency, 0)}</td><td class="${signCls(p.capture_bp_per_day)}">${steady ? "once" : bp(p.capture_bp_per_day, 1)}</td></tr>`; }).join("")
+      return `<tr><td>${cap(p.sell_on)}</td><td>${cap(p.buy_on)}</td><td>${bp(p.level_bp)}${steady ? " <b>steady</b>" : ""}</td><td>${p.episodes.toLocaleString()}</td><td>${pct(p.share_time, 1)}</td><td>${ms(p.median_ms)}</td><td>${ms(p.p90_ms)}</td><td>${ms(p.max_ms)}</td><td>${pct(p.share_open_after_latency, 0)}</td><td class="${signCls(p.capture_bp_per_day)}">${steady ? "once" : bp(p.capture_bp_per_day, 1)}</td><td>${p.median_size_usd == null ? "–" : money(p.median_size_usd)}</td><td>${p.median_profit_usd == null ? "–" : "$" + p.median_profit_usd.toFixed(2)}</td></tr>`; }).join("")
     : `<tr><td>No executable moment on any pair at ${fee} bp per fill in this window.</td></tr>`;
 
   const buckets = [["< 50 ms", 0, 50], ["50–150 ms", 50, 150], ["150–500 ms", 150, 500], ["0.5–2 s", 500, 2000], ["2–10 s", 2000, 10000], ["> 10 s", 10000, Infinity]];

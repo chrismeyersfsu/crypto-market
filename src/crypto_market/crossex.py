@@ -90,7 +90,26 @@ def _bitstamp(start: pd.Timestamp) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["ts", "close"])
 
 
-HISTORY = {"bitfinex": _bitfinex, "coinbase": _coinbase, "bitstamp": _bitstamp}
+def _binanceus(start: pd.Timestamp) -> pd.DataFrame:
+    rows, cur, now = [], start, pd.Timestamp.utcnow().tz_localize(None)
+    while cur < now:
+        r = httpx.get("https://api.binance.us/api/v3/klines",
+                      params={"symbol": "BTCUSD", "interval": "1m", "startTime": int(cur.timestamp() * 1000), "limit": 1000}, timeout=30)
+        r.raise_for_status()
+        page = r.json()
+        if not page:
+            break
+        rows += [(p[0], float(p[4])) for p in page]
+        last = pd.Timestamp(page[-1][0], unit="ms")
+        if last <= cur:
+            break
+        cur = last + pd.Timedelta(minutes=1)
+        time.sleep(0.15)
+    return pd.DataFrame(rows, columns=["ts", "close"])
+
+
+HISTORY = {"bitfinex": _bitfinex, "coinbase": _coinbase, "bitstamp": _bitstamp, "binanceus": _binanceus}
+VENUES = tuple(HISTORY)
 
 
 def minutes(refresh: bool = True) -> pd.DataFrame:
@@ -188,19 +207,21 @@ class _Book:
         else:
             side.pop(price, None)
 
-    def best(self) -> tuple[float, float] | None:
+    def best(self) -> tuple[float, float, float, float] | None:
+        """(bid, ask, bid size, ask size) or None while the book is empty/crossed."""
         if len(self.bids) > self.depth:
             self.bids = dict(sorted(self.bids.items(), reverse=True)[: self.depth])
         if len(self.asks) > self.depth:
             self.asks = dict(sorted(self.asks.items())[: self.depth])
         if self.bids and self.asks and max(self.bids) < min(self.asks):
-            return max(self.bids), min(self.asks)
+            b, a = max(self.bids), min(self.asks)
+            return b, a, self.bids[b], self.asks[a]
         return None
 
 
 class Collector:
-    """Streams top-of-book from each venue and appends (recv_ms, venue, bid, ask)
-    to a CSV. Timestamps are our receive clock, not the venue's: that's the
+    """Streams top-of-book from each venue and appends (recv_ms, venue, bid,
+    ask, bid size, ask size) to a CSV. Timestamps are our receive clock, not the venue's: that's the
     view a trader on this connection would actually have. Venues whose ticker
     channel is throttled (Kraken, Bitfinex) are read from their order-book
     stream instead, so a quote is never seconds stale."""
@@ -215,6 +236,7 @@ class Collector:
                      {"event": "subscribe", "channel": "book", "symbol": "tBTCUSD", "prec": "P0", "freq": "F0", "len": "25"}),
         "bitstamp": ("wss://ws.bitstamp.net",
                      {"event": "bts:subscribe", "data": {"channel": "order_book_btcusd"}}),
+        "binanceus": ("wss://stream.binance.us:9443/ws/btcusd@bookTicker", None),
     }
 
     def __init__(self):
@@ -224,13 +246,15 @@ class Collector:
         self.counts = {ex: 0 for ex in self.FEEDS}
 
     @staticmethod
-    def _parse(ex: str, m, book: _Book) -> tuple[float, float] | None:
+    def _parse(ex: str, m, book: _Book) -> tuple[float, float, float, float] | None:
         try:
             if ex == "coinbase" and m.get("type") == "ticker":
-                return float(m["best_bid"]), float(m["best_ask"])
+                return float(m["best_bid"]), float(m["best_ask"]), float(m["best_bid_size"]), float(m["best_ask_size"])
+            if ex == "binanceus" and "b" in m and "a" in m:
+                return float(m["b"]), float(m["a"]), float(m["B"]), float(m["A"])
             if ex == "bitstamp" and m.get("event") == "data":
                 d = m["data"]
-                return float(d["bids"][0][0]), float(d["asks"][0][0])
+                return float(d["bids"][0][0]), float(d["asks"][0][0]), float(d["bids"][0][1]), float(d["asks"][0][1])
             if ex == "kraken" and m.get("channel") == "book":
                 d = m["data"][0]
                 if m.get("type") == "snapshot":
@@ -260,14 +284,15 @@ class Collector:
             try:
                 book = _Book(self.DEPTH.get(ex, 0))
                 async with websockets.connect(url, ping_interval=20, max_size=2**22) as ws:
-                    await ws.send(json.dumps(sub))
+                    if sub is not None:
+                        await ws.send(json.dumps(sub))
                     backoff = 1
                     last = None
                     async for raw in ws:
                         q = self._parse(ex, json.loads(raw), book)
-                        if q and q != last:  # book streams repeat unchanged tops; only record changes
-                            last = q
-                            self.buf.append((int(time.time() * 1000), ex, q[0], q[1]))
+                        if q and q[:2] != last:  # record price changes; size-only changes would swamp the file
+                            last = q[:2]
+                            self.buf.append((int(time.time() * 1000), ex, *q))
                             self.counts[ex] += 1
             except Exception as e:
                 log.warning("tick feed %s: %s (retry in %ss)", ex, e, backoff)
@@ -285,7 +310,7 @@ class Collector:
                 with TICKS_FILE.open("a", newline="") as f:
                     w = csv.writer(f)
                     if new:
-                        w.writerow(["ts", "ex", "bid", "ask"]); new = False
+                        w.writerow(["ts", "ex", "bid", "ask", "bid_qty", "ask_qty"]); new = False
                     w.writerows(rows)
             if time.time() - last_prune > 3600:  # keep the file a rolling KEEP_H window
                 last_prune = time.time()
@@ -307,7 +332,7 @@ class Collector:
 
 def ticks(hours: float = 24) -> pd.DataFrame:
     if not TICKS_FILE.exists():
-        return pd.DataFrame(columns=["ts", "ex", "bid", "ask"])
+        return pd.DataFrame(columns=["ts", "ex", "bid", "ask", "bid_qty", "ask_qty"])
     df = pd.read_csv(TICKS_FILE)
     return df[df["ts"] >= (time.time() - hours * 3600) * 1000]
 
@@ -325,6 +350,8 @@ def episodes(df: pd.DataFrame, fee_bp: float, latency_ms: int) -> dict:
         return {"pairs": [], "n_ticks": 0, "hours": 0.0, "venues": []}
     wide_bid = df.pivot_table(index="ts", columns="ex", values="bid", aggfunc="last").ffill()
     wide_ask = df.pivot_table(index="ts", columns="ex", values="ask", aggfunc="last").ffill()
+    wide_bq = df.pivot_table(index="ts", columns="ex", values="bid_qty", aggfunc="last").ffill()
+    wide_aq = df.pivot_table(index="ts", columns="ex", values="ask_qty", aggfunc="last").ffill()
     venues = [v for v in wide_bid.columns if wide_bid[v].notna().sum() > 100]
     ts = wide_bid.index.values.astype("int64")
     span_h = (ts[-1] - ts[0]) / 3.6e6 if len(ts) > 1 else 0.0
@@ -334,18 +361,22 @@ def episodes(df: pd.DataFrame, fee_bp: float, latency_ms: int) -> dict:
         ok = bid_a.notna() & ask_b.notna()
         mid = (bid_a + ask_b) / 2
         raw = ((bid_a - ask_b) / mid * 1e4)[ok]
+        # dollars you could actually move at those two prices: the smaller of the two top-of-book sizes
+        size_usd = (pd.concat([wide_bq[a], wide_aq[b]], axis=1).min(axis=1) * mid)[ok]
         level = float(raw.median())
         edge = raw - 2 * fee_bp
         live = (edge > 0).values
         if not live.any():
             out.append({"sell_on": a, "buy_on": b, "level_bp": level, "episodes": 0, "share_time": 0.0,
                         "median_ms": None, "p90_ms": None, "max_ms": None, "share_open_after_latency": 0.0,
-                        "capture_bp_per_day": 0.0, "durations_ms": []})
+                        "capture_bp_per_day": 0.0, "median_size_usd": None, "median_profit_usd": None,
+                        "durations_ms": []})
             continue
         t = raw.index.values.astype("int64")
         e = edge.values
+        sz = size_usd.values
         starts = [i for i in range(len(live)) if live[i] and (i == 0 or not live[i - 1])]
-        durs, caps = [], []
+        durs, caps, sizes, profits = [], [], [], []
         for i in starts:
             j = i
             while j + 1 < len(live) and live[j + 1] and t[j + 1] - t[j] <= MAX_GAP_MS:
@@ -357,6 +388,8 @@ def episodes(df: pd.DataFrame, fee_bp: float, latency_ms: int) -> dict:
             while k + 1 < len(t) and t[k + 1] <= arrive:
                 k += 1
             caps.append(float(e[k]) if live[k] and k <= j else 0.0)
+            sizes.append(float(sz[i]) if not pd.isna(sz[i]) else float("nan"))
+            profits.append(float(e[i]) / 1e4 * sizes[-1])  # the whole edge, on all the size there was
         d = pd.Series(durs)
         share_time = float(d.sum() / (t[-1] - t[0])) if t[-1] > t[0] else 0.0
         out.append({
@@ -365,6 +398,8 @@ def episodes(df: pd.DataFrame, fee_bp: float, latency_ms: int) -> dict:
             "median_ms": float(d.median()), "p90_ms": float(d.quantile(0.9)), "max_ms": float(d.max()),
             "share_open_after_latency": float((d > latency_ms).mean()),
             "capture_bp_per_day": float(sum(caps) / span_h * 24) if span_h else 0.0,
+            "median_size_usd": float(pd.Series(sizes).median()),
+            "median_profit_usd": float(pd.Series(profits).median()),
             "durations_ms": [int(x) for x in d.sample(min(len(d), 2000), random_state=0)],
         })
     return {"pairs": out, "n_ticks": int(len(df)), "hours": span_h, "venues": venues,

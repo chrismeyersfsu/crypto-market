@@ -39,8 +39,8 @@ def index():
 
 @app.get("/api/crossex")
 def cross_exchange(
-    a: str = Query("coinbase", pattern="^(coinbase|bitstamp|bitfinex)$", description="minute bars: first venue"),
-    b: str = Query("bitstamp", pattern="^(coinbase|bitstamp|bitfinex)$", description="minute bars: second venue"),
+    a: str = Query("coinbase", pattern="^(coinbase|bitstamp|bitfinex|binanceus)$", description="minute bars: first venue"),
+    b: str = Query("bitstamp", pattern="^(coinbase|bitstamp|bitfinex|binanceus)$", description="minute bars: second venue"),
     fee: float = Query(10, ge=0, le=100, description="basis points per fill, charged on every venue touched"),
     latency_ms: int = Query(150, ge=0, le=60_000, description="how late after a gap opens your order could arrive"),
     hours: float = Query(24, ge=0.1, le=48, description="live-tick window to analyse"),
@@ -59,7 +59,7 @@ def cross_exchange(
         sweep.append({"fee_bp": f, "trades": r["trades"], "total_profit_bp": _clean(r["total_profit_bp"]),
                       "mean_profit_bp": _clean(r["mean_profit_bp"])})
     pairs = []
-    for x, y in (("coinbase", "bitstamp"), ("bitfinex", "coinbase"), ("bitfinex", "bitstamp")):
+    for x, y in (("coinbase", "bitstamp"), ("binanceus", "coinbase"), ("binanceus", "bitstamp"), ("bitfinex", "coinbase"), ("bitfinex", "bitstamp")):
         if m[[x, y]].dropna().empty:
             continue
         r = crossex.gap(m, x, y, fee, max_hold)
