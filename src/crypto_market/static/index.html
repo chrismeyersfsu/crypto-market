@@ -353,7 +353,7 @@ function renderCb(d) {
     `${d.triangles} triangles, ${rows.length} loops, ${d.alive_h.toFixed(1)} hours of Coinbase's order books recorded in the last ${p.hours} h. ` +
     `<b>${everPos.length}</b> of ${rows.length} loops were positive before fees at some point; the best-behaved is <b>${top.route}</b> with a median of ${bp(top.median_bp, 2)}, positive ${pct(top.share_time, 0)} of the time, on about ${money(top.median_size_usd)}. ` +
     (best ? `The largest single mismatch was <b>${best.route}</b> at ${bp(best.best_bp, 2)} on ${money(best.best_size_usd)}. ` : "") +
-    `At your fees (${p.coin_fee} bp on an ordinary pair, ${p.stable_fee} on a stable pair, so ${2 * p.coin_fee + +p.stable_fee} bp for a loop through USDT and ${3 * p.coin_fee} through BTC or ETH), ` +
+    `At the fees in the boxes above (${p.coin_fee} bp on an ordinary pair, ${p.stable_fee} on a stable pair, so ${2 * p.coin_fee + +p.stable_fee} bp for a loop through USDT and ${3 * p.coin_fee} through BTC or ETH), ` +
     (beat ? `<b>${beat.toLocaleString()}</b> episodes still beat the cost after ${lat} ms of latency, worth about <b>${money(perDay)} a day</b> on the size that was there.` : `<b>no</b> episode beat the cost after ${lat} ms of latency.`);
   document.getElementById("cTiles").innerHTML = [
     ["Loops watched", rows.length], ["Book updates", feed ? feed.updates.toLocaleString() : "–"], ["Recorded", d.alive_h ? d.alive_h.toFixed(1) + " h" : "–"],
