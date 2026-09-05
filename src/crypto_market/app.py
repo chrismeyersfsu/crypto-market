@@ -40,7 +40,7 @@ def index():
 
 @app.get("/api/crossex")
 def cross_exchange(
-    market: str = Query("btcusd", pattern="^(btcusd|usdtusd|usdcusd|usdcusdt)$"),
+    market: str = Query("btcusd", pattern="^(btcusd|ethusd|btcusdt|usdtusd|usdcusd|usdcusdt)$"),
     a: str = Query("coinbase", pattern="^(coinbase|bitstamp|bitfinex|binanceus)$", description="minute bars: first venue"),
     b: str = Query("bitstamp", pattern="^(coinbase|bitstamp|bitfinex|binanceus)$", description="minute bars: second venue"),
     fee: float = Query(10, ge=0, le=100, description="basis points per fill, charged on every venue touched"),
@@ -79,6 +79,29 @@ def cross_exchange(
     return {"market": market, "history_venues": venues,
             "minutes": {**{k: _clean(v) for k, v in g.items()}, "series": series, "fee_sweep": sweep, "pairs": pairs},
             "live": live}
+
+
+@app.get("/api/triangle")
+def triangle(
+    venue: str = Query("binanceus", pattern="^(coinbase|kraken|bitstamp|bitfinex|binanceus)$"),
+    fee: float = Query(2, ge=0, le=100, description="basis points per fill, three fills per round trip"),
+    latency_ms: int = Query(150, ge=0, le=60_000),
+    hours: float = Query(24, ge=0.1, le=48),
+):
+    m = crossex.triangle_minutes(fee, venue)
+    series = m.pop("series", None)
+    all_ticks = crossex.ticks(hours, None)
+    live = crossex.triangle_live(all_ticks, fee, latency_ms, all_ticks["ts"].values if len(all_ticks) else None)
+    live["routes"] = [{k: (_clean(v) if not isinstance(v, list) else v) for k, v in r.items()} for r in live["routes"]]
+    return {"minutes": {**{k: _clean(v) for k, v in m.items()}, "series": series}, "live": live,
+            "history_venues": [v for v in crossex.triangle_venues() if all(v in crossex.history_venues(x) for x in crossex.TRIANGLE)]}
+
+
+@app.get("/api/triangle/scan")
+def triangle_scan(fee: float = Query(2, ge=0, le=100), hours: float = Query(24, ge=0.1, le=48)):
+    r = crossex.triangle_scan(fee, hours)
+    r["rows"] = [{k: _clean(v) for k, v in row.items()} for row in r["rows"]]
+    return r
 
 
 @app.get("/api/markets")

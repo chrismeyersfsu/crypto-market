@@ -48,7 +48,7 @@
   <p class="sub">The one fast, small edge that is actually well-defined: buy a coin where it's cheap, sell it where it's dear, at the same moment. BTC is the obvious market; the stablecoins (USDT, USDC, priced in dollars and in each other) are the interesting one — their price barely moves, so what's left is purely the venues disagreeing with each other, and several venues charge far less on these pairs. Two datasets, two questions. Thirty days of 1-minute bars (public) say whether a gap <em>exists</em> and whether a "see it this minute, trade it the next" rule makes money after fees. Live best-bid/best-ask ticks, recorded by this server from each venue's public feed since it last started, say how many <em>milliseconds</em> a gap lasts — the number that decides whether a home connection could ever reach it.</p>
 
   <form id="fCrossex">
-    <label>Market <select id="xMarket"><option value="btcusd">BTC/USD</option><option value="usdtusd">USDT/USD</option><option value="usdcusd">USDC/USD</option><option value="usdcusdt">USDC/USDT</option></select></label>
+    <label>Market <select id="xMarket"><option value="btcusd">BTC/USD</option><option value="ethusd">ETH/USD</option><option value="btcusdt">BTC/USDT</option><option value="usdtusd">USDT/USD</option><option value="usdcusd">USDC/USD</option><option value="usdcusdt">USDC/USDT</option></select></label>
     <label>Venue A <select id="xA"><option value="coinbase">Coinbase</option><option value="bitstamp">Bitstamp</option><option value="bitfinex">Bitfinex</option><option value="binanceus">Binance.US</option></select></label>
     <label>Venue B <select id="xB"><option value="coinbase">Coinbase</option><option value="bitstamp" selected>Bitstamp</option><option value="bitfinex">Bitfinex</option><option value="binanceus">Binance.US</option></select></label>
     <label>Fee per fill (bp) <input type="number" id="xFee" value="1" step="0.5" min="0" max="100"></label>
@@ -83,7 +83,7 @@
   <div class="card">
     <h2>Live ticks: how long does an executable gap last?</h2>
     <p class="hint" id="xLiveHint"></p>
-    <p class="hint">A moment is "executable" when selling on one venue and buying on the other beats both fees, right now. An episode is an unbroken run of such moments. "Open after latency" is the share of episodes still there when your order could arrive. "Size at best price" is the median dollars actually on offer at the two prices (the smaller of the two order books' top levels), and "$ per episode" is the whole edge applied to that size — what one perfect, instant execution would have paid. Rows marked <b>steady</b> are a venue's persistent premium: executable almost continuously, but only once — after that round you hold the wrong asset on each side.</p>
+    <p class="hint">A moment is "executable" when selling on one venue and buying on the other beats both fees, right now. An episode is an unbroken run of such moments. "Open after latency" is the share of episodes still there when your order could arrive. "Size at best price" is the median dollars actually on offer at the two prices (the smaller of the two order books' top levels), and "$ per episode" is the whole edge applied to that size — what one perfect, instant execution would have paid. Rows marked <b>steady</b> are a venue's persistent premium: executable almost continuously, but only once — after that round you hold the wrong asset on each side. "Uniswap on Base" is not an exchange but an on-chain pool, read once a block (≈ 2 s): it has one price, and trading with it costs its 0.05% fee each way, so that is shown as its spread; its size is the dollars you can trade before moving its price by 1 bp. An on-chain trade also pays under a cent of gas and lands a block later, and the coins live in a wallet, not an exchange account.</p>
     <div style="overflow-x:auto"><table id="xLive"></table></div>
   </div>
 
@@ -91,6 +91,43 @@
     <h2>Episode durations, selected pair (both directions)</h2>
     <p class="hint">How long each executable gap between Venue A and Venue B stayed open. Anything left of your latency was gone before you could act.</p>
     <div class="chart short"><canvas id="xDur"></canvas></div>
+  </div>
+
+  <h1 style="margin-top:32px">Triangle: are the three prices on one exchange consistent with each other?</h1>
+  <p class="sub">Dollars → BTC → USDT → dollars (or the reverse), all on one venue, all at once. Nothing ever leaves the exchange, so there is no stranded balance to unwind and no second connection — but it is three fills, so the cost is three fees, and BTC/USDT is a thin market on the US venues (Coinbase's spread on it runs ≈ 4 bp against 0.1 bp on BTC/USD). The check is whether <code>BTC/USD == BTC/USDT × USDT/USD</code>; the mismatch, in basis points, is the gross profit of one round trip.</p>
+  <form id="fTri">
+    <label>Venue <select id="tVenue"><option value="coinbase">Coinbase</option><option value="kraken">Kraken</option><option value="bitstamp">Bitstamp</option><option value="bitfinex">Bitfinex</option><option value="binanceus" selected>Binance.US</option></select></label>
+    <label>Fee per fill (bp) <input type="number" id="tFee" value="2" step="0.5" min="0" max="100"></label>
+    <label>Your latency (ms) <input type="number" id="tLat" value="150" step="10" min="0" max="60000"></label>
+    <label>Live window (h) <input type="number" id="tHours" value="24" step="1" min="1" max="48"></label>
+    <button class="primary">Run</button>
+    <span id="tStatus" class="hint"></span>
+  </form>
+  <p class="hint">Fee per fill on BTC/USDT and USDT/USD is usually the venue's normal rate for the BTC side and its stablecoin rate for the USDT side; a single number is used here for simplicity. Kraken has no 30-day minute history (live only).</p>
+
+  <div class="card">
+    <p class="verdict" id="tVerdict"></p>
+    <div class="tiles" id="tTiles"></div>
+  </div>
+
+  <div class="card">
+    <h2>Mismatch, last 30 days (1-minute closes)</h2>
+    <p class="hint">Basis points. Positive: BTC is dear in dollars relative to the USDT route (dollars → USDT → BTC → dollars would profit before spreads and fees); negative: the reverse. Closes can't see the spread, so this overstates what is really there.</p>
+    <div class="chart"><canvas id="tGap"></canvas></div>
+  </div>
+
+  <div class="card">
+    <h2>Live ticks: every venue, both directions, at the bids and asks you would actually hit</h2>
+    <p class="hint" id="tLiveHint"></p>
+    <p class="hint">"Steady level" is the median gross mismatch in that direction, before fees. "Size" is the dollars the thinnest of the three legs allowed; "$ per episode" is the whole edge on that size.</p>
+    <div style="overflow-x:auto"><table id="tLive"></table></div>
+  </div>
+
+  <div class="card">
+    <h2>Every triangle on Coinbase, scanned once a minute</h2>
+    <p class="hint" id="tScanHint"></p>
+    <p class="hint">Each coin Coinbase lists both in dollars and in BTC, ETH or USDT, both directions, at the best bid and ask at the moment of the scan. "Gross" is before fees; "beyond 3 fees" uses the fee box above. Sorted by median gross, best first. A big positive number on a coin with tiny size is a stale quote on a market nobody trades, not money.</p>
+    <div style="overflow-x:auto"><table id="tScan"></table></div>
   </div>
   </section>
 </main>
@@ -116,7 +153,7 @@ Chart.defaults.plugins.tooltip.borderWidth = 1;
 let xGapChart, xSweepChart, xDurChart;
 const bp = (v, d = 1) => v == null ? "–" : v.toFixed(d) + " bp";
 const ms = v => v == null ? "–" : v >= 10000 ? (v / 1000).toFixed(0) + " s" : v >= 1000 ? (v / 1000).toFixed(1) + " s" : Math.round(v) + " ms";
-const MARKET_NAMES = { btcusd: "BTC/USD", usdtusd: "USDT/USD", usdcusd: "USDC/USD", usdcusdt: "USDC/USDT" };
+const MARKET_NAMES = { btcusd: "BTC/USD", ethusd: "ETH/USD", btcusdt: "BTC/USDT", usdtusd: "USDT/USD", usdcusd: "USDC/USD", usdcusdt: "USDC/USDT" };
 const FEE_HINTS = {
   btcusd: `1 bp = 0.01%. Retail fee tiers for a market order on BTC: Coinbase ≈ 60 bp, Bitstamp ≈ 40, Kraken ≈ 26, Bitfinex ≈ 20, Binance.US 0 — but see the "size" column below for what a zero-fee venue's order book actually holds at the best price. Every round trip here pays the fee four times (buy and sell on both venues, then unwind both).`,
   stable: `1 bp = 0.01%. Stablecoin pairs sit on a separate, cheaper fee schedule at most venues (retail tier, taker/market order): Binance.US 2 bp (0 to rest an order), Bitstamp 8 bp (6 to rest), Coinbase ≈ 0.5 bp on its "stable pairs" (0 to rest — but USDT pairs were reportedly moved off that schedule in 2025; check the live fee page), Kraken a flat 20 bp, Bitfinex 0 but closed to US customers. Coinbase also converts USDC to dollars 1:1 with no fee, which is what pins USDC near $1 everywhere. Every round trip here pays the fee four times (buy and sell on both venues, then unwind both). Kraken has no 30-day minute history here (its public candles keep twelve hours), so it appears in the live section only.`,
@@ -129,7 +166,7 @@ function xMarketChanged() {
     for (const o of sel.options) o.disabled = hist ? !hist.includes(o.value) : false;
     if (sel.selectedOptions[0]?.disabled) sel.value = hist.find(v => v !== document.getElementById(id === "xA" ? "xB" : "xA").value);
   }
-  document.getElementById("xFeeHint").textContent = FEE_HINTS[market === "btcusd" ? "btcusd" : "stable"];
+  document.getElementById("xFeeHint").textContent = FEE_HINTS[market.startsWith("btc") || market === "ethusd" ? "btcusd" : "stable"];
 }
 function xParams() {
   const g = id => document.getElementById(id).value;
@@ -148,10 +185,10 @@ async function runCrossex(e) {
 function renderCrossex(d) {
   const m = d.minutes, fee = +document.getElementById("xFee").value || 0, lat = +document.getElementById("xLat").value || 0;
   const a = document.getElementById("xA").value, b = document.getElementById("xB").value, mk = MARKET_NAMES[d.market];
-  const NAMES = { coinbase: "Coinbase", bitstamp: "Bitstamp", bitfinex: "Bitfinex", kraken: "Kraken", binanceus: "Binance.US" };
+  const NAMES = { coinbase: "Coinbase", bitstamp: "Bitstamp", bitfinex: "Bitfinex", kraken: "Kraken", binanceus: "Binance.US", base: "Uniswap on Base" };
   const cap = s => NAMES[s] || s;
   const zeroFee = m.fee_sweep.find(x => x.fee_bp === 0), breakEven = m.fee_sweep.filter(x => x.trades > 0 && x.total_profit_bp > 0).map(x => x.fee_bp);
-  const maxOk = breakEven.length ? Math.max(...breakEven) : null, cheapest = d.market === "btcusd" ? 16 : 2;  // Kraken maker on BTC; Binance.US taker on stable pairs
+  const maxOk = breakEven.length ? Math.max(...breakEven) : null, cheapest = /^(btc|eth)/.test(d.market) ? 16 : 2;  // Kraken maker on coin pairs; Binance.US taker on stable pairs
   document.getElementById("xVerdict").innerHTML =
     `${mk} — ${cap(a)} vs ${cap(b)}, ${m.days.toFixed(0)} days of minute bars: the gap wobbles by a median of <b>${bp(m.abs_dev_median_bp)}</b> around a steady level of ${bp(m.level_bp)} (95th percentile ${bp(m.dev_p95_bp)}). ` +
     `At ${fee} bp per fill the see-it-then-trade-it rule found <b>${m.trades.toLocaleString()}</b> trades and made <b class="${signCls(m.total_profit_bp)}">${bp(m.total_profit_bp, 0)}</b> in total (${pct(m.total_profit_bp / 1e4, 2)} of capital). ` +
@@ -214,6 +251,68 @@ function renderCrossex(d) {
       scales: { x: { grid: { display: false } }, y: { ticks: { precision: 0 }, grid: { color: css("--grid") }, title: { display: true, text: durs.length ? `of ${durs.length} episodes` : "no episodes yet" } } } }
   });
 }
+// -------- Triangle --------
+let tGapChart, tReq = 0;
+async function runTriangle(e) {
+  e && e.preventDefault();
+  const g = id => document.getElementById(id).value, status = document.getElementById("tStatus"), mine = ++tReq;
+  status.textContent = "loading…"; status.className = "hint";
+  const r = await fetch("/api/triangle?" + new URLSearchParams({ venue: g("tVenue"), fee: g("tFee") || 0, latency_ms: g("tLat") || 0, hours: g("tHours") || 24 }));
+  if (mine !== tReq) return;
+  if (!r.ok) { status.textContent = (await r.json()).detail; status.className = "err"; return; }
+  renderTriangle(await r.json()); status.textContent = "";
+}
+function renderTriangle(d) {
+  const NAMES = { coinbase: "Coinbase", bitstamp: "Bitstamp", bitfinex: "Bitfinex", kraken: "Kraken", binanceus: "Binance.US", base: "Uniswap on Base" };
+  const cap = s => NAMES[s] || s, m = d.minutes, fee = +document.getElementById("tFee").value || 0, lat = +document.getElementById("tLat").value || 0;
+  const venue = document.getElementById("tVenue").value;
+  if (!m.n_minutes) {
+    document.getElementById("tVerdict").innerHTML = `${cap(venue)}: no 30-day minute history for all three markets (${d.history_venues.map(cap).join(", ")} have it). See the live table below.`;
+    document.getElementById("tTiles").innerHTML = ""; tGapChart?.destroy(); tGapChart = null;
+  } else {
+    document.getElementById("tVerdict").innerHTML =
+      `${cap(venue)}, ${m.days.toFixed(0)} days of minute closes: the three prices disagree by a median of <b>${bp(m.abs_median_bp, 2)}</b> (95th percentile ${bp(m.p95_bp, 2)}), around a steady ${bp(m.level_bp, 2)}. ` +
+      `At ${fee} bp per fill (${3 * fee} bp per round trip) the closes were inconsistent by more than the cost in <b>${m.minutes_beyond_cost.toLocaleString()}</b> minutes (${pct(m.share_beyond_cost, 2)} of the time), ` +
+      (m.minutes_beyond_cost ? `worth ${bp(m.sum_beyond_cost_bp, 0)} in total if every one had been taken at the close — before the BTC/USDT spread, which the live table below charges you for.` : `so never.`);
+    document.getElementById("tTiles").innerHTML = [
+      ["Steady mismatch", bp(m.level_bp, 2)], ["Typical mismatch", bp(m.abs_median_bp, 2)], ["95th percentile", bp(m.p95_bp, 2)],
+      ["Minutes beyond 3 fees", m.minutes_beyond_cost.toLocaleString()], ["Share of time", pct(m.share_beyond_cost, 2)],
+    ].map(([k, v]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+    tGapChart?.destroy();
+    tGapChart = new Chart(document.getElementById("tGap"), {
+      type: "line",
+      data: { labels: m.series.t.map(t => t.replace("T", " ")), datasets: [{ label: "Mismatch", data: m.series.mismatch, borderColor: css("--s1"), borderWidth: 1, pointRadius: 0 }] },
+      options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${bp(c.parsed.y, 2)}` } } },
+        scales: { x: { ticks: { maxTicksLimit: 8, maxRotation: 0, callback: (v, i) => m.series.t[i].slice(5, 10) }, grid: { display: false } },
+                  y: { ticks: { callback: v => v + " bp", maxTicksLimit: 7 }, grid: { color: css("--grid") } } } }
+    });
+  }
+  const L = d.live, pv = Object.entries(L.per_venue);
+  document.getElementById("tLiveHint").textContent = pv.length ?
+    `Ticks across the three markets: ${pv.map(([k, v]) => `${cap(k)} ${v.toLocaleString()}`).join(", ")}.` :
+    "No venue has live ticks for all three markets yet — the BTC/USDT feed started with the last server restart.";
+  const rows = L.routes;
+  document.getElementById("tLive").innerHTML = rows.length ?
+    `<tr><th>Venue</th><th>Route</th><th>Steady level</th><th>Episodes</th><th>Share of time</th><th>Median</th><th>90th pct</th><th>Longest</th><th>Open after ${lat} ms</th><th>Capturable / day</th><th>Size</th><th>$ per episode</th></tr>` +
+    rows.map(p => `<tr><td>${cap(p.venue)}</td><td>${p.route}</td><td class="${signCls(p.level_bp)}">${bp(p.level_bp)}</td><td>${p.episodes.toLocaleString()}</td><td>${pct(p.share_time, 1)}</td><td>${ms(p.median_ms)}</td><td>${ms(p.p90_ms)}</td><td>${ms(p.max_ms)}</td><td>${pct(p.share_open_after_latency, 0)}</td><td class="${signCls(p.capture_bp_per_day)}">${bp(p.capture_bp_per_day, 1)}</td><td>${p.median_size_usd == null ? "–" : money(p.median_size_usd)}</td><td>${p.median_profit_usd == null ? "–" : "$" + p.median_profit_usd.toFixed(2)}</td></tr>`).join("")
+    : "";
+}
+async function runScan() {
+  const g = id => document.getElementById(id).value;
+  const r = await fetch("/api/triangle/scan?" + new URLSearchParams({ fee: g("tFee") || 0, hours: g("tHours") || 24 }));
+  if (!r.ok) return;
+  const d = await r.json(), fee = +g("tFee") || 0;
+  document.getElementById("tScanHint").textContent = d.scans ?
+    `${d.scans.toLocaleString()} scans of ${d.triangles} triangles since ${new Date(d.since * 1000).toLocaleString()}.` :
+    "No scans yet — the first runs a few seconds after the server starts.";
+  document.getElementById("tScan").innerHTML = d.rows.length ?
+    `<tr><th>Route</th><th>Latest gross</th><th>Median gross</th><th>90th pct</th><th>Best seen</th><th>Beyond ${3 * fee} bp</th><th>Size</th><th>$ per scan</th></tr>` +
+    d.rows.map(p => `<tr><td>${p.route}</td><td class="${signCls(p.latest_bp)}">${bp(p.latest_bp)}</td><td class="${signCls(p.median_bp)}">${bp(p.median_bp)}</td><td>${bp(p.p90_bp)}</td><td>${bp(p.best_bp)}</td><td>${pct(p.share_beyond_cost, 0)}</td><td>${money(p.median_size_usd)}</td><td>$${p.median_profit_usd.toFixed(2)}</td></tr>`).join("") : "";
+}
+document.getElementById("fTri").addEventListener("submit", e => { runTriangle(e); runScan(); });
+runScan();
+runTriangle();
 document.getElementById("fCrossex").addEventListener("submit", runCrossex);
 document.getElementById("xMarket").addEventListener("change", xMarketChanged);
 xMarketChanged();
