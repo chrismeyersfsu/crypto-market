@@ -8,7 +8,7 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 
-from . import backtest, data, funding, onchain
+from . import backtest, data, funding, hourly, intraday, onchain
 
 app = FastAPI(title="crypto-market")
 STATIC = Path(__file__).parent / "static"
@@ -115,6 +115,64 @@ def run_backtest(
         ],
         "sample": sample,
         "trades": {s: results[s]["trades"].to_dict("records") for s in ("weekday", "weekend", "custom")},
+    }
+
+
+@app.get("/api/intraday")
+def intraday_signal(
+    lookback: int = Query(24, ge=1, le=168, description="hours"),
+    direction: str = Query("momentum", pattern="^(momentum|reversal)$"),
+    slippage: float = Query(0.05, ge=0, le=1, description="percent per position flip"),
+    start: str | None = None,
+    end: str | None = None,
+    split: str | None = None,
+):
+    h = hourly.load()
+    if start:
+        h = h[h.index >= pd.Timestamp(start)]
+    if end:
+        h = h[h.index <= pd.Timestamp(end)]
+    if len(h) < lookback * 4:
+        raise HTTPException(400, "not enough hourly history in range")
+    close = h["close"]
+    slip = slippage / 100
+
+    r = intraday.momentum(close, lookback, direction, slip)
+    bh = close / close.iloc[0]
+    st = {k: _clean(v) for k, v in intraday.stats(r["equity"]).items()}
+    dow = intraday.hour_of_day(close)
+
+    sample = None
+    if split:
+        cut = pd.Timestamp(split)
+        halves = {}
+        for hh, sub in (("in", close[close.index < cut]), ("out", close[close.index >= cut])):
+            if len(sub) < lookback * 4:
+                halves[hh] = {}
+                continue
+            rr = intraday.momentum(sub, lookback, direction, slip)
+            halves[hh] = {**{k: _clean(v) for k, v in intraday.stats(rr["equity"]).items()},
+                          "flips": rr["flips"], "signal_t_stat": _clean(rr["signal_t_stat"]),
+                          "signal_mean_with": _clean(rr["signal_mean_with"]),
+                          "signal_mean_against": _clean(rr["signal_mean_against"])}
+        sample = halves
+
+    step = max(len(h) // 2000, 1)  # thin for the chart; stats use full resolution
+    return {
+        "dates": [dt.date().isoformat() for dt in r["equity"].index[::step]],
+        "equity_signal": [round(v, 4) for v in (10_000 * r["equity"])[::step]],
+        "equity_hold": [round(v, 4) for v in (10_000 * bh)[::step]],
+        "stats": st,
+        "flips": r["flips"],
+        "signal_t_stat": _clean(r["signal_t_stat"]),
+        "signal_mean_with": _clean(r["signal_mean_with"]),
+        "signal_mean_against": _clean(r["signal_mean_against"]),
+        "sample": sample,
+        "hour_of_day": [
+            {"hour": int(i), "mean": _clean(float(row["mean"])), "median": _clean(float(row["median"])),
+             "n": int(row["n"]), "win_rate": _clean(float(row["win_rate"]))}
+            for i, row in dow.iterrows()
+        ],
     }
 
 

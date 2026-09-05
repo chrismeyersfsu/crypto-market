@@ -51,6 +51,7 @@
     <button class="tab active" id="tabBacktest">Weekday backtest</button>
     <button class="tab" id="tabFunding">Funding arb</button>
     <button class="tab" id="tabOnchain">Large-transfer signal</button>
+    <button class="tab" id="tabIntraday">Intraday (hourly)</button>
   </nav>
 
   <section id="viewBacktest">
@@ -206,6 +207,47 @@
       </details>
     </div>
   </section>
+
+  <section id="viewIntraday" hidden>
+    <h1>Does "day trading" work at hourly resolution?</h1>
+    <p class="sub">Hourly BTC bars from Bitfinex (public, back to 2013) — the finest free history available, and the actual timescale "day trading" implies. Two tests: is any hour of day (UTC) reliably better or worse, and does the direction of the last N hours predict the next N (momentum), or invert (reversal)? Every position flip costs slippage, since these rules can flip thousands of times.</p>
+
+    <div class="card">
+      <h2>Average return by hour of day (UTC)</h2>
+      <p class="hint">Bitcoin trades 24/7, so "hour of day" here is a UTC clock hour, not a session open/close. Hover for median, win rate and sample size.</p>
+      <div class="chart short"><canvas id="iHour"></canvas></div>
+    </div>
+
+    <form id="fIntraday">
+      <label>Lookback / hold <select id="iLookback"><option value="1">1 hour</option><option value="4">4 hours</option><option value="8">8 hours</option><option value="24" selected>24 hours</option><option value="72">72 hours</option></select></label>
+      <label>Direction <select id="iDir"><option value="momentum">momentum (long after a rise)</option><option value="reversal">reversal (long after a fall)</option></select></label>
+      <label>Slippage %/flip <input type="number" id="iSlip" value="0.05" step="0.01" min="0"></label>
+      <label>Out-of-sample from <input type="date" id="iSplit" value="2021-01-01"></label>
+      <label>Scale <select id="iScale"><option value="logarithmic">log</option><option value="linear">linear</option></select></label>
+      <button class="primary">Run</button>
+      <span id="iStatus" class="hint"></span>
+    </form>
+
+    <div class="card">
+      <p class="verdict" id="iVerdict"></p>
+      <div class="tiles" id="iTiles"></div>
+    </div>
+
+    <div class="card">
+      <h2>Growth of $10,000</h2>
+      <div class="legend">
+        <span style="--c:var(--s1)">Hold BTC</span>
+        <span style="--c:var(--s3)">Signal, after slippage</span>
+      </div>
+      <div class="chart"><canvas id="iEq"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h2>In-sample vs out-of-sample</h2>
+      <p class="hint" id="iSampleHint"></p>
+      <table id="iSample"></table>
+    </div>
+  </section>
 </main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -340,6 +382,9 @@ function render(d) {
 }
 
 // -------- Tabs --------
+let fundingLoaded = false, fEqChart, fRateChart;
+let onchainLoaded = false, oEqChart;
+let intradayLoaded = false, iEqChart, iHourChart;
 function showTab(name) {
   document.getElementById("viewBacktest").hidden = name !== "backtest";
   document.getElementById("viewFunding").hidden = name !== "funding";
@@ -347,16 +392,19 @@ function showTab(name) {
   document.getElementById("tabBacktest").classList.toggle("active", name === "backtest");
   document.getElementById("tabFunding").classList.toggle("active", name === "funding");
   document.getElementById("tabOnchain").classList.toggle("active", name === "onchain");
+  document.getElementById("viewIntraday").hidden = name !== "intraday";
+  document.getElementById("tabIntraday").classList.toggle("active", name === "intraday");
   localStorage.setItem("cm-tab", name);
   if (name === "funding" && !fundingLoaded) { fundingLoaded = true; runFunding(); }
   if (name === "onchain" && !onchainLoaded) { onchainLoaded = true; runOnchain(); }
+  if (name === "intraday" && !intradayLoaded) { intradayLoaded = true; loadHourChart(); runIntraday(); }
 }
 document.getElementById("tabBacktest").addEventListener("click", () => showTab("backtest"));
 document.getElementById("tabFunding").addEventListener("click", () => showTab("funding"));
 document.getElementById("tabOnchain").addEventListener("click", () => showTab("onchain"));
+document.getElementById("tabIntraday").addEventListener("click", () => showTab("intraday"));
 
 // -------- Funding arb tab --------
-let fundingLoaded = false, fEqChart, fRateChart;
 
 function fParams() {
   const g = id => document.getElementById(id).value;
@@ -423,10 +471,9 @@ function renderFunding(d) {
 
 document.getElementById("fFunding").addEventListener("submit", runFunding);
 document.getElementById("fScale").addEventListener("change", () => fEqChart && (fEqChart.options.scales.y.type = document.getElementById("fScale").value, fEqChart.update()));
-showTab(["funding", "onchain"].includes(localStorage.getItem("cm-tab")) ? localStorage.getItem("cm-tab") : "backtest");
+showTab(["funding", "onchain", "intraday"].includes(localStorage.getItem("cm-tab")) ? localStorage.getItem("cm-tab") : "backtest");
 
 // -------- Large-transfer signal tab --------
-let onchainLoaded = false, oEqChart;
 function oParams() {
   const g = id => document.getElementById(id).value;
   const p = new URLSearchParams({ z_thresh: g("oZ") || 2, hold_days: g("oHold") || 7 });
@@ -482,6 +529,75 @@ function renderOnchain(d) {
 }
 document.getElementById("fOnchain").addEventListener("submit", runOnchain);
 document.getElementById("oScale").addEventListener("change", () => oEqChart && (oEqChart.options.scales.y.type = document.getElementById("oScale").value, oEqChart.update()));
+
+// -------- Intraday tab --------
+function iParams() {
+  const g = id => document.getElementById(id).value;
+  const p = new URLSearchParams({ lookback: g("iLookback"), direction: g("iDir"), slippage: g("iSlip") || 0 });
+  if (g("iSplit")) p.set("split", g("iSplit"));
+  return p;
+}
+async function runIntraday(e) {
+  e && e.preventDefault();
+  const status = document.getElementById("iStatus");
+  status.textContent = "loading…"; status.className = "hint";
+  const r = await fetch("/api/intraday?" + iParams());
+  if (!r.ok) { status.textContent = (await r.json()).detail; status.className = "err"; return; }
+  renderIntraday(await r.json()); status.textContent = "";
+}
+function renderIntraday(d) {
+  const s = d.stats, lb = document.getElementById("iLookback").value, dir = document.getElementById("iDir").value;
+  const survives = s.cagr > 0 && d.sample?.out?.cagr > 0;
+  document.getElementById("iVerdict").innerHTML =
+    `${lb}h ${dir}, ${d.flips.toLocaleString()} position flips over the full history, ${document.getElementById("iSlip").value}% slippage per flip: ` +
+    `$10k → <b class="${signCls(s.cagr)}">${money(d.equity_signal[d.equity_signal.length - 1])}</b> (CAGR ${pct(s.cagr)}), vs ` +
+    `<b>${money(d.equity_hold[d.equity_hold.length - 1])}</b> for holding. ` +
+    (survives ? "It survives costs and the out-of-sample check — still worth treating with suspicion at this turnover." :
+      "It does <b>not</b> survive — negative after costs, or reverses out-of-sample, or both. That's the typical outcome at this frequency.");
+  document.getElementById("iTiles").innerHTML = [
+    ["CAGR after slippage", pct(s.cagr), s.cagr], ["Max drawdown", pct(s.max_drawdown, 0), s.max_drawdown],
+    ["Return / vol", num(s.sharpe), null], ["Position flips", d.flips.toLocaleString(), null],
+    ["Return with signal", pct(d.signal_mean_with, 3), d.signal_mean_with],
+    ["Return against signal", pct(d.signal_mean_against, 3), d.signal_mean_against],
+  ].map(([k, v, sg]) => `<div class="tile"><div class="k">${k}</div><div class="v ${sg !== undefined && sg !== null ? signCls(sg) : ""}">${v}</div></div>`).join("");
+
+  const scale = document.getElementById("iScale").value;
+  iEqChart?.destroy();
+  iEqChart = new Chart(document.getElementById("iEq"), {
+    type: "line",
+    data: { labels: d.dates, datasets: [
+      { label: "Hold BTC", data: d.equity_hold, borderColor: css("--s1"), borderWidth: 1.5, pointRadius: 0 },
+      { label: "Signal", data: d.equity_signal, borderColor: css("--s3"), borderWidth: 1.5, pointRadius: 0 },
+    ] },
+    options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${money(c.parsed.y)}` } } },
+      scales: { x: { ticks: { maxTicksLimit: 8, maxRotation: 0 }, grid: { display: false } },
+                y: { type: scale, ticks: { callback: v => money(v), maxTicksLimit: 7 }, grid: { color: css("--grid") } } } }
+  });
+
+  const sp = document.getElementById("iSplit").value;
+  document.getElementById("iSampleHint").textContent = `Before ${sp} vs from ${sp} on.`;
+  const cols = [["CAGR", "cagr", v => pct(v)], ["Max DD", "max_drawdown", v => pct(v, 0)], ["Return / vol", "sharpe", v => num(v)], ["Flips", "flips", v => v?.toLocaleString() ?? "–"], ["Signal t-stat", "signal_t_stat", v => num(v)]];
+  document.getElementById("iSample").innerHTML = d.sample ?
+    `<tr><th></th><th>In-sample</th><th>Out-of-sample</th></tr>` +
+    cols.map(([lab, key, f]) => `<tr><td>${lab}</td><td class="${key === "cagr" ? signCls(d.sample.in[key]) : ""}">${f(d.sample.in[key])}</td><td class="${key === "cagr" || key === "signal_t_stat" ? signCls(d.sample.out[key]) : ""}">${f(d.sample.out[key])}</td></tr>`).join("")
+    : "";
+}
+document.getElementById("fIntraday").addEventListener("submit", runIntraday);
+document.getElementById("iScale").addEventListener("change", () => iEqChart && (iEqChart.options.scales.y.type = document.getElementById("iScale").value, iEqChart.update()));
+
+async function loadHourChart() {
+  const r = await fetch("/api/intraday?lookback=24&direction=momentum");
+  const d = await r.json();
+  iHourChart?.destroy();
+  iHourChart = new Chart(document.getElementById("iHour"), {
+    type: "bar",
+    data: { labels: d.hour_of_day.map(r => String(r.hour).padStart(2, "0") + ":00"), datasets: [{ data: d.hour_of_day.map(r => r.mean * 100), backgroundColor: css("--s1"), borderRadius: 3, maxBarThickness: 28 }] },
+    options: { responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => { const r = d.hour_of_day[c.dataIndex]; return [` mean ${num(r.mean * 100, 3)}%`, ` median ${num(r.median * 100, 3)}%`, ` win rate ${pct(r.win_rate, 0)}`, ` n = ${r.n.toLocaleString()}`]; } } } },
+      scales: { x: { ticks: { maxTicksLimit: 12 }, grid: { display: false } }, y: { ticks: { callback: v => v.toFixed(2) + "%" }, grid: { color: css("--grid") } } } }
+  });
+}
 
 document.getElementById("f").addEventListener("submit", run);
 function ruleUI() { const b = document.getElementById("rule").value === "breakout"; document.querySelectorAll("label.days").forEach(l => l.hidden = b); document.querySelectorAll("label.brk").forEach(l => l.hidden = !b); }
