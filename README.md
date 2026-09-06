@@ -191,7 +191,13 @@ prices and Binance.US's costs; the 12-hour and 4-hour baskets are the 7
 that trade in most hours. He also trades futures and bets on falls, which
 spot cannot, so this is half of what he runs; and the coins on disk are
 the ones that survived to 2026, which he says flatters this kind of test
-several times over.
+several times over. The robustness rows (drop the biggest contributors
+in-sample and held-back, re-pick each January, the finer settings grid)
+are in the same family; `strategies/tweaks.py` is the paper run's four
+rules with one thing changed at a time (drop a coin, measured bid-ask
+gaps, act weekly, wait for a signal to hold, a majority vote, a BTC
+filter, a trailing stop, sizing by volatility, other caps), family
+`tweaks`.
 
 ## Paper run (`/paper`)
 
@@ -208,10 +214,11 @@ a small difference); no coin over 10% of a rule's money; lot sizes
 ignored. `data/paper/` holds state.json, orders.csv and daily.csv (the
 account, the basket held from day one, and BTC held from day one, valued
 at each step). `paper.py start` opens the account; `status` prints what
-the page shows. Six months is one sample: the backtest's 30% a year is
-about 14% over six months with swings that make anything from -10% to
-+35% consistent with it, so the run mainly tests whether live fills track
-the model, not whether the rules make money.
+the page shows. Six months is one sample, and the backtest gives no
+expectation to test against: its 31% a year held back is ZEC's rise, and
+without ZEC the same rules made -7% (see the findings). The run tests
+whether live fills track the model and whether the rules make anything on
+the other 14 coins; a ZEC-sized move in some coin would settle nothing.
 
 ## Findings so far
 
@@ -280,24 +287,38 @@ is one sample; it is the only thing here worth a second look, and it is
 not a business.
 
 The playbook. The one strategy that came out of a book rather than a
-guess does better than anything above, and for the reason the book gives:
-a basket instead of one coin, and rule types combined. On 15 coins at
-daily bars since 2021, equal money in the in-sample-best of each rule
-type (above the 50-day average, a 10/50 crossover, a 20-day breakout, an
-RSI-14 dip, each coin capped at 10%) made 31% a year in the held-back
-2025-01 to 2026-09 (Sharpe 0.96, worst dip -33%) while holding the same
-coins made -1% and BTC -8%; acted a day late it made 27%; by year +37,
--17, +76, +57, +50, +1, against a basket that lost 74% in 2022 -- it
-earns its keep by being in cash when coins fall, and lags the basket in
-the years they rise. The author's own checks for a rule worth running:
-neighbours, where every average from 30 to 75 days makes 37-54% held back
-and the five crossovers around 10/50 make 24-31%, a plateau, while 100
-and 200 days and the slow crossovers lose money and all 44 variants
-averaged make 0%; dropping the 3 or 5 coins that contributed most, which
-changes nothing (34% and 33% held back); and re-choosing the picks each
-January from the years before, which chooses the same four every year and
-makes 46% a year over 2023-2026 (+69, +57, +50, +2). What is left
-against it: the 12-hour and 4-hour versions make 1-3% a year held back
-against 28% for holding; the held-back window is one period; and the
-coins are the survivors, which nothing here corrects. It is running
-forward on paper from 2026-09-06 (`/paper`).
+guess looked better than anything above, and then failed the check that
+matters. On 15 coins at daily bars since 2021, equal money in the
+in-sample-best of each rule type (above the 50-day average, a 10/50
+crossover, a 20-day breakout, an RSI-14 dip, each coin capped at 10%)
+made 31% a year in the held-back 2025-01 to 2026-09 (Sharpe 0.96, worst
+dip -33%) while holding the same coins made -1% and BTC -8%; acted a day
+late it made 27%; by year +37, -17, +76, +57, +50, +1, against a basket
+that lost 74% in 2022. It passed the author's checks: neighbours, where
+every average from 30 to 75 days makes 37-54% held back and the five
+crossovers around 10/50 make 24-31%, while 100 and 200 days and the slow
+crossovers lose money and all 44 variants averaged make 0%; dropping the
+3 or 5 coins that contributed most in-sample (34% and 33% held back); and
+re-choosing the picks each January from the years before, which chooses
+the same four every year and makes 46% a year over 2023-2026 (+69, +57,
++50, +2). But the held-back return is one coin: ZEC rose from $58 to over
+$1,000 in the held-back part and the rules held it the whole way; of the
+56 points of account return the combination made held back, ZEC gave 61
+and the other 14 coins together -5. Without ZEC the same four rules,
+re-picked, made -7% a year held back (2025 -8%, 2026 -5%), and without
+the three biggest held-back contributors -10%. The drop-coins check had
+passed because it dropped the 2021-2024 winners, which said nothing about
+2025. `strategies/tweaks.py` tries one change at a time and finds the
+same thing from the other side: every change that raises the held-back
+number (a 15% or 20% cap, holding a coin only when a majority of the
+rules agree) does it by holding more ZEC, and every change that spreads
+risk (a smaller cap, sizing by volatility, a trailing stop, holding
+nothing while BTC is below its long average) lowers it; charging the
+bid-ask gaps measured on 2026-09-06 costs 4 points a year, and dropping
+the four coins with a gap of 15 bp or more gives -1% because ZEC is one
+of them. What is left for the rules is 2023 and 2024 (+76, +57), which
+the walk-forward test chose rules for without seeing; what is against
+them is 2025 without ZEC and 2026, the 12-hour and 4-hour versions (1-3%
+a year held back against 28% for holding), and the survivor-only universe.
+It is running forward on paper from 2026-09-06 (`/paper`), which is the
+only remaining way to tell.

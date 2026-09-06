@@ -11,7 +11,7 @@
 <nav class="nav"><a href="/">All analyses</a><a href="/triangles">Triangles</a><a href="/crossex">Across exchanges</a><a href="/resting">Resting orders</a><a href="/search">Strategy search</a><a href="/paper" aria-current="page">Paper run</a></nav>
 
 <h1>Paper run: the playbook basket, six months, real prices, pretend money</h1>
-<p class="sub">The one strategy from the search worth a second look, run forward instead of backward. Every day just after 00:00 UTC, when the daily bar closes, the server fetches the day's Coinbase closes, runs the same four rules the backtest ran on the same 15 coins, and turns each changed signal into an order filled at Binance.US's live best bid or ask at that moment plus the 2 bp fee. $10,000, four rules with $2,500 each, no coin over 10% of a rule's money. Two things are being tested: whether real fills track the backtest's assumed fill at the bar's close, and whether the rules go on working after the data they were chosen on ended. Nothing here trades for real, and six months is short — see the note under the chart.</p>
+<p class="sub">The one strategy from the search that looked worth a second look, run forward instead of backward. Every day just after 00:00 UTC, when the daily bar closes, the server fetches the day's Coinbase closes, runs the same four rules the backtest ran on the same 15 coins, and turns each changed signal into an order filled at Binance.US's live best bid or ask at that moment plus the 2 bp fee. $10,000, four rules with $2,500 each, no coin over 10% of a rule's money. Two things are being tested: whether real fills track the backtest's assumed fill at the bar's close, and whether the rules go on working after the data they were chosen on ended. Nothing here trades for real, and six months is short — see the note under the chart.</p>
 
 <div class="card">
   <p class="verdict" id="pVerdict"></p>
@@ -78,7 +78,7 @@ async function runPaper() {
   if (d.backtest) {
     const b = d.backtest, half = Math.pow(1 + b.oos_ann_pct / 100, 0.5) - 1;
     document.getElementById("pExpect").textContent =
-      `What the backtest would lead you to expect: ${b.oos_ann_pct.toFixed(0)}% a year in its held-back part (${b.oos_from.slice(0, 10)} to ${b.to.slice(0, 10)}; Sharpe ${b.oos_sharpe.toFixed(2)}, worst drop ${b.oos_maxdd_pct.toFixed(0)}%), which is about ${pct(half, 0)} over six months. With swings that size, anything from roughly -10% to +35% in six months is consistent with the backtest, so this run mostly tests whether live orders behave like the model; it cannot settle whether the rules make money.`;
+      `What the backtest says: ${b.oos_ann_pct.toFixed(0)}% a year in its held-back part (${b.oos_from.slice(0, 10)} to ${b.to.slice(0, 10)}; Sharpe ${b.oos_sharpe.toFixed(2)}, worst drop ${b.oos_maxdd_pct.toFixed(0)}%), about ${pct(half, 0)} over six months — but that number is one coin. ZEC rose from $58 to over $1,000 in the held-back part and the rules held it the whole way; without ZEC the same rules made -7% a year. So there is no expectation to test against: this run checks whether live orders behave like the model, and whether the rules make anything on the other 14 coins. Six months is one sample either way.`;
   }
 
   document.getElementById("pRules").innerHTML = `<tr><th>Rule</th><th>Worth</th><th>Cash</th><th>Holds</th><th>Signal on</th></tr>` +

@@ -343,37 +343,45 @@ def run():
             # --- robustness checks the daily combined-best-of-each-rule-type basket still needed:
             #     drop the biggest contributors, walk-forward re-picking, a finer settings grid.
 
-            # 1. drop the coins that contributed most to the combo's in-sample return, re-pick, re-run
-            ins_mask, _ = bt.split(idx)
-            contrib = pd.Series(0.0, index=close.columns)
+            # 1. drop the coins that contributed most, re-pick, re-run. Ranked two ways: by in-sample
+            #    contribution (no held-back data used) and by held-back contribution, which is the one that
+            #    answers "is the held-back result one coin's rally?" -- dropping a coin because it did well
+            #    held back can only make the check harder to pass, so it is the honest direction to peek in
+            ins_mask, oos_mask = bt.split(idx)
+            contrib_is = pd.Series(0.0, index=close.columns)
+            contrib_oos = pd.Series(0.0, index=close.columns)
             for _, _, _, _, sig, cap in picks.values():
                 tgt = targets_from_signal(sig, close, cap)
                 c = _contributions(tgt, close, cost)
-                contrib = contrib.add(c[ins_mask].sum() / len(picks), fill_value=0.0)
-            ranked = contrib.sort_values(ascending=False)
-            for k in (3, 5):
-                drop = list(ranked.index[:k])
-                close2, cost2 = close.drop(columns=drop), cost.drop(index=drop)
-                note_uni2 = (f"{close2.shape[1]} coins, after dropping the {k} biggest in-sample "
-                             f"contributors ({', '.join(drop)}) from: {uni}")
-                families2, v2 = _pick_families(close2, cost2, interval, btc, note_uni2)
-                variants += v2
-                picks2 = {kk: max(v, key=lambda x: x[0]) for kk, v in families2.items()}
-                nets2 = [p[1] for p in picks2.values()]
-                combo2 = np.mean(nets2, axis=0)
-                variants += 1
-                r = bt.score_returns(combo2, idx, interval, "binanceus", f"basket of {close2.shape[1]}",
-                                     len(nets2), bh=btc,
-                                     note=(f"dropped the {k} coins that contributed most in-sample to the "
-                                           f"combo above ({', '.join(drop)}); picks: " +
-                                           "; ".join(f"{p[2]} [{p[3]}]" for p in picks2.values()) +
-                                           "; " + note_uni2))
-                r.update(strategy=f"combined: best of each rule type, without the {k} coins that contributed most",
-                         params=f"dropped: {', '.join(drop)}", maker=False,
-                         cost_bp=round(float(cost2.mean() * 1e4), 2), fee_bp=bt.FEE_BP["binanceus"],
-                         note=r["note"] + "; " + _by_year(combo2, idx))
-                rows.append(r)
-                extra_rows.append(r)
+                contrib_is = contrib_is.add(c[ins_mask].sum() / len(picks), fill_value=0.0)
+                contrib_oos = contrib_oos.add(c[oos_mask].sum() / len(picks), fill_value=0.0)
+            for where, contrib, ks in (("in-sample", contrib_is, (3, 5)), ("held-back", contrib_oos, (1, 3))):
+                ranked = contrib.sort_values(ascending=False)
+                for k in ks:
+                    drop = list(ranked.index[:k])
+                    close2, cost2 = close.drop(columns=drop), cost.drop(index=drop)
+                    note_uni2 = (f"{close2.shape[1]} coins, after dropping the {k} biggest {where} "
+                                 f"contributors ({', '.join(drop)}) from: {uni}")
+                    families2, v2 = _pick_families(close2, cost2, interval, btc, note_uni2)
+                    variants += v2
+                    picks2 = {kk: max(v, key=lambda x: x[0]) for kk, v in families2.items()}
+                    nets2 = [p[1] for p in picks2.values()]
+                    combo2 = np.mean(nets2, axis=0)
+                    variants += 1
+                    r = bt.score_returns(combo2, idx, interval, "binanceus", f"basket of {close2.shape[1]}",
+                                         len(nets2), bh=btc,
+                                         note=(f"dropped the {k} coin{'s' if k > 1 else ''} that contributed most {where} to the "
+                                               f"combo above ({', '.join(drop)}: "
+                                               + ", ".join(f"{contrib[d] * 100:+.0f}" for d in drop)
+                                               + " points of account return); picks: " +
+                                               "; ".join(f"{p[2]} [{p[3]}]" for p in picks2.values()) +
+                                               "; " + note_uni2))
+                    r.update(strategy=f"combined: best of each rule type, without the {k} coin{'s' if k > 1 else ''} that contributed most {where}",
+                             params=f"dropped: {', '.join(drop)}", maker=False,
+                             cost_bp=round(float(cost2.mean() * 1e4), 2), fee_bp=bt.FEE_BP["binanceus"],
+                             note=r["note"] + "; " + _by_year(combo2, idx))
+                    rows.append(r)
+                    extra_rows.append(r)
 
             # 2. walk-forward: re-pick each rule type's best (by sharpe on bars before that year), year by year
             years = (2023, 2024, 2025, 2026)
