@@ -9,8 +9,8 @@ exchange than another?
 
 The landing page is one card per analysis, each with its question and its
 one-line finding; the analyses are separate pages, `/triangles`,
-`/crossex`, `/resting` and `/search`, sharing `static/site.css` and
-`static/site.js`.
+`/crossex`, `/resting`, `/search` and `/paper`, sharing `static/site.css`
+and `static/site.js`.
 
 ## Triangles on one exchange (`/triangles`)
 
@@ -192,6 +192,26 @@ that trade in most hours. He also trades futures and bets on falls, which
 spot cannot, so this is half of what he runs; and the coins on disk are
 the ones that survived to 2026, which he says flatters this kind of test
 several times over.
+
+## Paper run (`/paper`)
+
+The playbook's daily basket, run forward for six months from 2026-09-06
+with pretend money: `paper.py`. A systemd user timer
+(`crypto-market-paper.timer`, 00:10 UTC daily) runs `python -m
+crypto_market.paper step`, which fetches the day's Coinbase closes, runs
+the same four rules as the backtest (above the 50-day average, a 10/50
+crossover, a 20-day breakout, an RSI-14 dip) on the same 15 coins, and
+fills each changed signal at Binance.US's live best bid or ask from
+`/api/v3/ticker/bookTicker`, plus the 2 bp fee. $10,000, $2,500 a rule,
+each rule its own account (the backtest re-balanced between rules daily,
+a small difference); no coin over 10% of a rule's money; lot sizes
+ignored. `data/paper/` holds state.json, orders.csv and daily.csv (the
+account, the basket held from day one, and BTC held from day one, valued
+at each step). `paper.py start` opens the account; `status` prints what
+the page shows. Six months is one sample: the backtest's 30% a year is
+about 14% over six months with swings that make anything from -10% to
++35% consistent with it, so the run mainly tests whether live fills track
+the model, not whether the rules make money.
 
 ## Findings so far
 

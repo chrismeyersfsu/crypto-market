@@ -8,7 +8,7 @@
 </head>
 <body>
 <main>
-<nav class="nav"><a href="/" aria-current="page">All analyses</a><a href="/triangles">Triangles</a><a href="/crossex">Across exchanges</a><a href="/resting">Resting orders</a><a href="/search">Strategy search</a></nav>
+<nav class="nav"><a href="/" aria-current="page">All analyses</a><a href="/triangles">Triangles</a><a href="/crossex">Across exchanges</a><a href="/resting">Resting orders</a><a href="/search">Strategy search</a><a href="/paper">Paper run</a></nav>
 
 <h1>Is there money on the table in crypto markets, for someone with a home connection and a small account?</h1>
 <p class="sub">Four ways of asking. Each page is one question, the data this server recorded or fetched to answer it, and the honest answer with costs included. The finding on each card is the short version; the page has the numbers and the controls.</p>
@@ -34,9 +34,22 @@
     <p class="q">A wider net: trend, reversion, one exchange leading another, order flow, pairs, timing, and a basket strategy from a book, about 1,800 variants over a year to five years of candles, with real costs and the last 30% of the data held back.</p>
     <p class="finding"><b>The main finding is a warning:</b> Binance.US's minute and hour bars are stale, and every spectacular number came from buying a price the next trade corrected. The one thing worth a second look is the basket from the playbook, 30% a year held back against -1% for holding, whose neighbouring settings lose.</p>
   </a>
+  <a class="card" href="/paper">
+    <h2>Paper run of the playbook basket</h2>
+    <p class="q">The one idea worth a second look, run forward for six months from 2026-09-06: the same four rules on the same 15 coins, orders filled at Binance.US's live prices plus fees, $10,000 of pretend money, one step a day.</p>
+    <p class="finding" id="paperLine"><b>Running.</b> Day-by-day value against holding the coins and holding BTC.</p>
+  </a>
 </div>
 
 <p class="foot">Methods, data and the full findings are in the <a href="https://github.com/chrismeyersfsu/crypto-market#readme">README</a>. Nothing on these pages is advice, and nothing here is a strategy to run money on.</p>
 </main>
+<script>
+fetch("/api/paper").then(r => r.json()).then(d => {
+  if (!d.running) return;
+  const last = d.daily[d.daily.length - 1] || {}, t = d.live ? d.live.total : last.total, b = d.live ? d.live.basket : last.basket;
+  const p = v => ((v - d.capital) / d.capital * 100).toFixed(1) + "%";
+  document.getElementById("paperLine").innerHTML = `<b>Day ${d.day} of ${d.days}: $${Math.round(t).toLocaleString()} (${p(t)}),</b> against $${Math.round(b).toLocaleString()} (${p(b)}) for holding the coins.`;
+}).catch(() => {});
+</script>
 </body>
 </html>

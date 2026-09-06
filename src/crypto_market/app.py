@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse
 
-from . import backtest, cbtri, crossex, resting, strategies
+from . import backtest, cbtri, crossex, paper, resting, strategies
 
 
 @asynccontextmanager
@@ -41,7 +41,7 @@ def _clean(v):
     return v
 
 
-PAGES = {"triangles", "crossex", "resting", "search"}
+PAGES = {"triangles", "crossex", "resting", "search", "paper"}
 ASSETS = {"site.css", "site.js"}
 
 
@@ -188,6 +188,17 @@ def resting_curve(strategy: str = Query(..., max_length=80)):
     for rule, g in c.groupby("rule"):
         out[rule] = {"t": (g.ts // 1000).tolist(), "pnl": g.pnl_usd.tolist()}
     return {"strategy": strategy, "rules": out}
+
+
+@app.get("/api/paper")
+def paper_status():
+    """The paper run of the playbook basket: value so far, holdings, orders, and the backtest to compare against."""
+    d = paper.status()
+    for key in ("daily", "orders"):
+        for row in d.get(key, []):
+            for k, v in row.items():
+                row[k] = _clean(v)
+    return d
 
 
 @app.get("/api/strategies")

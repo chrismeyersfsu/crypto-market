@@ -8,7 +8,7 @@
 </head>
 <body>
 <main>
-<nav class="nav"><a href="/">All analyses</a><a href="/triangles">Triangles</a><a href="/crossex">Across exchanges</a><a href="/resting" aria-current="page">Resting orders</a><a href="/search">Strategy search</a></nav>
+<nav class="nav"><a href="/">All analyses</a><a href="/triangles">Triangles</a><a href="/crossex">Across exchanges</a><a href="/resting" aria-current="page">Resting orders</a><a href="/search">Strategy search</a><a href="/paper">Paper run</a></nav>
 <h1>Resting orders on Binance.US: twenty strategies replayed against a month of real trades</h1>
   <section id="viewRest">
   <p class="sub">Binance.US charges nothing for an order that rests on the book and is filled by someone else's trade (2 bp when you fill someone else's). A resting order only fills when somebody trades at your price, so the honest test is to replay every trade that actually happened and ask, for each one, whether it would have filled an order you had sitting there. Two fill rules bracket the truth: <b>through</b> — a trade printed at a price beyond yours, so your whole price level was eaten and you were filled whatever your place in the queue (the pessimistic rule and the one to believe); <b>touch</b> — a trade at exactly your price fills you up to its size, as if you were first in line (optimistic). Orders are $100, the coin held may drift $500 either way from where it started, and an order takes 200 ms to arrive. Profit counts what is held at the end at the current price.</p>
