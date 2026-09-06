@@ -10,11 +10,17 @@ note); a setting that only looks good with ZEC in the basket is a setting
 that held ZEC longer, not a better rule.
 
     uv run python -m crypto_market.strategies.params
+    uv run python -m crypto_market.strategies.params --since 2024-09-06   # the last two years only
+
+With --since the signals are still computed on the whole history (so a
+200-day average is a 200-day average on the window's first day) but the
+account only runs, and the 70/30 split only applies, inside the window;
+the results go to a separate family, params-since-<date>.
 """
 
 from __future__ import annotations
 
-import itertools
+import sys
 
 import numpy as np
 import pandas as pd
@@ -61,8 +67,12 @@ def params_text(kind, p):
     return f"rsi={p[0]} buy<{p[1]} sell>{p[2]}"
 
 
-def _net(sigs, close, cost):
+def _net(sigs, close, cost, since=None):
+    """Equal money in each rule's account; with `since`, the walk starts there (signals already known)."""
     nets, turnover, trades = [], 0.0, 0
+    if since is not None:
+        close = close.loc[since:]
+        sigs = [s.loc[since:] for s in sigs]
     for s in sigs:
         n, t, k = _run_account(pb.targets_from_signal(s, close, CAP), close, cost)
         nets.append(n)
@@ -71,19 +81,21 @@ def _net(sigs, close, cost):
     return np.mean(nets, axis=0), turnover / len(sigs), trades
 
 
-def run():
+def run(since=None):
     close, cost, uni = pb.universe(INTERVAL)
-    btc = close["BTCUSD"].pct_change().shift(-1).to_numpy()[:-1]
-    idx = close.index[:-1]
+    win = close.loc[since:] if since else close
+    btc = win["BTCUSD"].pct_change().shift(-1).to_numpy()[:-1]
+    idx = win.index[:-1]
     close_x, cost_x = close.drop(columns=["ZECUSD"]), cost.drop(index=["ZECUSD"])
-    base_note = f"15 coins, cap {CAP}; {uni}; survivors only"
+    base_note = f"15 coins, cap {CAP}; {uni}; survivors only" + (f"; account run from {since} only, signals from the whole history" if since else "")
+    family = f"params-since-{since}" if since else "params"
     rows, variants = [], 0
 
     def score(sigs, sigs_x, strategy, params, note):
         nonlocal variants
         variants += 1
-        net, turnover, trades = _net(sigs, close, cost)
-        net_x, _, _ = _net(sigs_x, close_x, cost_x)
+        net, turnover, trades = _net(sigs, close, cost, since)
+        net_x, _, _ = _net(sigs_x, close_x, cost_x, since)
         rx = bt.score_returns(net_x, idx, INTERVAL, "binanceus", "x", 0)
         r = bt.score_returns(net, idx, INTERVAL, "binanceus", f"basket of {close.shape[1]}", trades, bh=btc,
                              note=f"without ZEC: {rx['is_ann_pct']:+.1f}% in-sample, {rx['oos_ann_pct']:+.1f}% held back "
@@ -112,11 +124,12 @@ def run():
                   params_text(kind, p) + tag,
                   f"the paper run's combination with this rule's setting changed and the other three as run; " + base_note)
 
-    return bt.record("params", rows, variants_tried=variants)
+    return bt.record(family, rows, variants_tried=variants)
 
 
 def main():
-    p = run()
+    since = sys.argv[sys.argv.index("--since") + 1] if "--since" in sys.argv else None
+    p = run(since)
     df = pd.read_csv(p)
     pd.set_option("display.width", 250)
     df["oos_no_zec"] = df.note.str.extract(r"without ZEC: [-+\d.]+% in-sample, ([-+\d.]+)% held back").astype(float)

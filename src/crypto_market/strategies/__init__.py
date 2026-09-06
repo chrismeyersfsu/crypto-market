@@ -67,4 +67,12 @@ READINGS = {
               "The settings the paper run uses are neither the best nor the worst of their neighbours either way. "
               "Changing the numbers does not change the answer: the rules made money on ZEC and on 2023-2024, and on "
               "nothing else in the held-back part.",
+    "params-since-2024-09-06": "The same 34 settings with the account run over the last two years only (signals still "
+              "from the whole history), so the first 70% is 2024-09 to 2026-01, which holds all of ZEC's rise, and the "
+              "held-back part is the seven months 2026-01-29 to 2026-09-04. In-sample numbers of 50-130% a year are that "
+              "rise and mean nothing. Held back, with ZEC the combinations make 4-24% a year (median 14%; as run 16%) "
+              "against 4% for holding the 15 coins and -3% for BTC; without ZEC they make -4% to +7% (median 0%; as run "
+              "+1%) against -22% for holding the other 14 coins. That is the rules doing the one thing they are for, being "
+              "in cash while coins fall, and it is seven months, the window every setting was chosen to look good in, "
+              "with 17 of 34 settings above zero without ZEC and 17 below.",
 }

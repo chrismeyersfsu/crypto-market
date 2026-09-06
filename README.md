@@ -200,7 +200,9 @@ filter, a trailing stop, sizing by volatility, other caps), family
 `tweaks`; `strategies/params.py` is the same four rules with their
 numbers changed one rule at a time (34 settings, each alone and each
 swapped into the combination, scored with and without ZEC), family
-`params`.
+`params`; with `--since 2024-09-06` the account runs over the last two
+years only (signals still from the whole history), family
+`params-since-2024-09-06`.
 
 ## Paper run (`/paper`)
 
