@@ -197,7 +197,10 @@ are in the same family; `strategies/tweaks.py` is the paper run's four
 rules with one thing changed at a time (drop a coin, measured bid-ask
 gaps, act weekly, wait for a signal to hold, a majority vote, a BTC
 filter, a trailing stop, sizing by volatility, other caps), family
-`tweaks`.
+`tweaks`; `strategies/params.py` is the same four rules with their
+numbers changed one rule at a time (34 settings, each alone and each
+swapped into the combination, scored with and without ZEC), family
+`params`.
 
 ## Paper run (`/paper`)
 
@@ -316,7 +319,13 @@ risk (a smaller cap, sizing by volatility, a trailing stop, holding
 nothing while BTC is below its long average) lowers it; charging the
 bid-ask gaps measured on 2026-09-06 costs 4 points a year, and dropping
 the four coins with a gap of 15 bp or more gives -1% because ZEC is one
-of them. What is left for the rules is 2023 and 2024 (+76, +57), which
+of them. Changing the rules' numbers (`strategies/params.py`: 34
+settings across the four rule types, each alone and each swapped into
+the combination) does not change the answer: with ZEC every combination
+makes 11-36% held back, without it every one loses 4-15% a year, and the
+only settings above zero without ZEC are the RSI dip rule on its own at
+14 or 21 days (+5-7%), which is rarely in the market. What is left for
+the rules is 2023 and 2024 (+76, +57), which
 the walk-forward test chose rules for without seeing; what is against
 them is 2025 without ZEC and 2026, the 12-hour and 4-hour versions (1-3%
 a year held back against 28% for holding), and the survivor-only universe.

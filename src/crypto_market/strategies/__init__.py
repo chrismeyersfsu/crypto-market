@@ -57,4 +57,14 @@ READINGS = {
               "four coins with a gap of 15 bp or more (ATOM 204, ALGO 46, LTC 17, ZEC 15) gives -1%, because ZEC is one of "
               "them. Reading the signals once a week makes 17%; waiting two or three days before acting on one 27% and 23%. "
               "Nothing here improves the strategy; the rows show what the held-back number is made of.",
+    "params": "The paper run's four rule types with their numbers changed, one rule at a time: 9 averaging windows from "
+              "10 to 200 days, 8 crossover pairs, 5 breakout lengths, 12 RSI settings, each on its own and each swapped "
+              "into the combination, scored with and without ZEC. With ZEC in the basket the combination makes 11-36% a "
+              "year held back for every setting except the slowest (a 200-day average or a 50/200 crossover, 11-13%), "
+              "which looks like a plateau. Without ZEC every one of the 34 combinations loses money held back, -4% to "
+              "-15% a year, and so does every trend rule on its own (-2% to -35%); the only settings above zero without "
+              "ZEC are the RSI dip rule alone at 14 or 21 days (+5 to +7%), which is in the market a fraction of the time. "
+              "The settings the paper run uses are neither the best nor the worst of their neighbours either way. "
+              "Changing the numbers does not change the answer: the rules made money on ZEC and on 2023-2024, and on "
+              "nothing else in the held-back part.",
 }
