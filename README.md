@@ -284,17 +284,20 @@ guess does better than anything above, and for the reason the book gives:
 a basket instead of one coin, and rule types combined. On 15 coins at
 daily bars since 2021, equal money in the in-sample-best of each rule
 type (above the 50-day average, a 10/50 crossover, a 20-day breakout, an
-RSI-14 dip, each coin capped at 10%) made 30% a year in the held-back
-2025-02 to 2026-09 (Sharpe 0.9, worst dip -33%) while holding the same
-coins made -1% and BTC -8%; acted a day late it made 26%; by year +37,
+RSI-14 dip, each coin capped at 10%) made 31% a year in the held-back
+2025-01 to 2026-09 (Sharpe 0.96, worst dip -33%) while holding the same
+coins made -1% and BTC -8%; acted a day late it made 27%; by year +37,
 -17, +76, +57, +50, +1, against a basket that lost 74% in 2022 -- it
 earns its keep by being in cash when coins fall, and lags the basket in
-the years they rise. Against it: the neighbouring settings lose money
-(100- and 200-day averages, the other three crossovers), and all 44
-variants averaged make -1%, so the result rests on the picks; the
-12-hour and 4-hour versions make 1-3% a year held back against 28% for
-holding; the held-back window is one period; and the coins are the
-survivors. The author's own tests for a rule worth running are
-neighbours that also work and results that survive removing the coins
-that did best; this passes the one-bar-late test and fails the
-neighbours test.
+the years they rise. The author's own checks for a rule worth running:
+neighbours, where every average from 30 to 75 days makes 37-54% held back
+and the five crossovers around 10/50 make 24-31%, a plateau, while 100
+and 200 days and the slow crossovers lose money and all 44 variants
+averaged make 0%; dropping the 3 or 5 coins that contributed most, which
+changes nothing (34% and 33% held back); and re-choosing the picks each
+January from the years before, which chooses the same four every year and
+makes 46% a year over 2023-2026 (+69, +57, +50, +2). What is left
+against it: the 12-hour and 4-hour versions make 1-3% a year held back
+against 28% for holding; the held-back window is one period; and the
+coins are the survivors, which nothing here corrects. It is running
+forward on paper from 2026-09-06 (`/paper`).
